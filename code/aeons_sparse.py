@@ -1,10 +1,10 @@
-# import sys
-# sys.path.insert(0, "/home/lukas/software/longreadsim")
+import sys
+sys.path.insert(0, "/home/lukas/software/longreadsim")
 
 import longreadsim
 import os
 import numpy as np
-# import Aeons
+import Aeons
 # from Aeons import plot_gt
 # from importlib import reload
 # reload(Aeons)
@@ -14,13 +14,20 @@ cwd = os.getcwd()
 
 #%%
 # vars for simulated seqs
-N = 10000
-mu = 50
-lam = 200
-sd = 2
+N = 30000
+mu = 30
+lam = 500
+sd = 10
 
-k = 21
-const = Constants(mu=mu, lam=lam, sd=sd, N=N, k=k)
+k = 23
+err = 0.02
+
+maxbatch = 10
+batchsize = 10
+
+size = int(1e7)
+
+const = Aeons.Constants(mu=mu, lam=lam, sd=sd, N=N, k=k, err=err, maxbatch=maxbatch, batchsize=batchsize, size=size)
 #%%
 # simulate a genome and a single fastq that can be used to mmap
 genome = longreadsim.SimGenome([N], perc=const.perc)
@@ -29,16 +36,18 @@ fastq = longreadsim.SimFastq(genome=genome, read_dist=read_dist, batch_size=1000
 reads = fastq.simulate_batch()
 #%%
 # set up AeonsRun
-ar = AeonsRun(const=const, fq_source=f'{cwd}/reads_0.fastq')
+ar = Aeons.AeonsRun(const=const, fq_source=f'{cwd}/reads_0.fastq')
 self = ar
 
 ar.process_batch()
 
 
 #%%
-self.gt_format(mat=self.benefit)
-# plot_s(dbg.gtg)
-plot_w(self.gtg)
+# ar.dbg.gt_format(mat=ar.dbg.benefit)
+# plot_w(ar.dbg.gtg)
+#%%
+# TODO fix (maybe create gtg again within)
+# plot_complex(dbg=self.dbg, steps=100)
 
 #%%
 from time import sleep

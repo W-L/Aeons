@@ -1755,3 +1755,315 @@ def get_edge_list(self, from_scratch=True):
     nkmer = len(self.obs_kmers)
     return nkmer
 
+
+# POST HYBRID APPROACH IMPLEMENTATION
+
+ # add the edges to both the kmer and k+1mer graph
+self.dbg.update_graph(updated_kmers=self.bloom.updated_kmers)  # TODO tmp
+self.dbg.update_graph_p(updated_kmers=self.bloom.updated_kmers_p)  # TODO tmp
+
+
+allequal(self.dbg.adjacency, self.dbg2.adjacency)
+
+indices = np.where(self.dbg.adjacency.data != self.dbg2.adjacency.data)
+
+# TODO a few places in the matrix have higher values now. why?
+# maybe that is actually correct
+
+self.dbg.adjacency.data[indices]
+self.dbg2.adjacency.data[indices]
+
+
+def update_graph(self, updated_kmers):
+    # take updated kmers of a batch and perform updates to the graph structure
+    # derive indices of the adjacency matrix
+
+    # find the threshold for solid kmers
+    threshold = self.bloom.solid_kmers()
+    # print(f"using threshold {threshold}")
+
+    # the updates need to be coordinates in the graph and a weight (count)
+    updated_kmers = list(updated_kmers)
+    n_updates = len(updated_kmers)
+
+    updated_edges = np.zeros(shape=(n_updates * 2, 3), dtype='int64')
+    # 17 slots, one for the index, the others for the path counts
+    updated_paths = np.zeros(shape=(n_updates * 2, 17), dtype='int64')
+
+    # kmer indices dict - collect the indices of this batch and write to file
+    kmer_dict = dict()
+    # to check if reverse comp is already updated, keep another set
+    processed_kmers = set()
+
+    km1 = set()
+    indices = set()
+
+    for i in range(n_updates):
+        km = updated_kmers[i]
+
+        # check if reverse comp is already updated
+        if km in processed_kmers:
+            continue
+
+        # km = list(updated_kmers)[4]
+        count = self.bloom.bloomf.get(km)
+
+        # solid threshold
+        if count < threshold:
+            continue
+
+        # slice the vertices
+        lmer = km[:-1]
+        rmer = km[1:]
+        # and get their index
+        lmer_ind = self.kmer2index(kmer=lmer, m=True)
+        rmer_ind = self.kmer2index(kmer=rmer, m=True)
+
+        # add to dict for dumping
+        kmer_dict[lmer] = lmer_ind
+        kmer_dict[rmer] = rmer_ind
+
+        # collect the indices of source & target & the weight in an array
+        updated_edges[i, :] = (lmer_ind, rmer_ind, count)
+        updated_edges[i + n_updates, :] = (rmer_ind, lmer_ind, count)
+
+        # now check the possible paths for both the lmer & rmer
+        lpaths = count_paths(node=lmer, bloom_paths=self.bloom.bloomf_p, t_solid=threshold)
+        rpaths = count_paths(node=rmer, bloom_paths=self.bloom.bloomf_p, t_solid=threshold)
+
+        # collect the indices and counts for the paths
+        updated_paths[i, 0] = lmer_ind
+        updated_paths[i, 1:] = lpaths
+        updated_paths[i + n_updates, 0] = rmer_ind
+        updated_paths[i + n_updates, 1:] = rpaths
+
+        # add the processed kmer to the set
+        processed_kmers.add(km)
+        processed_kmers.add(reverse_complement(km))
+
+        # just for testing, collect all k-1mers
+        if not reverse_complement(lmer) in km1:
+            km1.add(lmer)
+
+        if not reverse_complement(rmer) in km1:
+            km1.add(rmer)
+
+        # and all indices
+        indices.add(lmer_ind)
+        indices.add(rmer_ind)
+
+    # check for collisions
+    coll = len(km1) - len(indices)
+    if coll > 0:
+        print(f"{coll} hash collisions")
+
+    # reduce the updated arrays to exclude duplicated reverse comps
+    updated_edges = updated_edges[~np.all(updated_edges == 0, axis=1)]
+    updated_paths = updated_paths[~np.all(updated_paths == 0, axis=1)]
+
+    # apply the updated edges to the adjacency matrix
+    self.adjacency[updated_edges[:, 0], updated_edges[:, 1]] = updated_edges[:, 2]
+
+    # save the updated paths - used in a separate function to update the scores
+    # also save the edges    - used for writing the GFA file
+    self.updated_paths = updated_paths
+    self.updated_edges = updated_edges
+    self.kmer_dict = kmer_dict
+
+
+def update_graph_p(self, updated_kmers):
+    """
+    Updating the k+1 mer graph
+    """
+    # the updates need to be just coordinates in the graph
+    updated_kmers = list(updated_kmers)
+    n_updates = len(updated_kmers)
+
+    updated_edges = np.zeros(shape=(n_updates * 2, 2), dtype='int64')
+
+    # to check if reverse comp is already updated, keep another set
+    processed_kmers = set()
+
+    km1 = set()
+    indices = set()
+
+    for i in range(n_updates):
+        km = updated_kmers[i]
+
+        # check if reverse comp is already updated
+        if km in processed_kmers:
+            continue
+
+        # slice the vertices
+        # here we cut the lmer and rmer by subtracting 2. i.e. skipping a node in between to mark the path
+        # but use the same indices as in the other matrix
+        lmer = km[:-2]
+        rmer = km[2:]
+        # and get their index
+        lmer_ind = self.kmer2index(kmer=lmer, m=True)
+        rmer_ind = self.kmer2index(kmer=rmer, m=True)
+
+        # collect the indices of source & target & the weight in an array
+        updated_edges[i, :] = (lmer_ind, rmer_ind)
+        updated_edges[i + n_updates, :] = (rmer_ind, lmer_ind)
+
+        # add the processed kmer to the set
+        processed_kmers.add(km)
+        processed_kmers.add(reverse_complement(km))
+
+        # just for testing, collect all k-1mers
+        if not reverse_complement(lmer) in km1:
+            km1.add(lmer)
+
+        if not reverse_complement(rmer) in km1:
+            km1.add(rmer)
+
+        # and all indices
+        indices.add(lmer_ind)
+        indices.add(rmer_ind)
+
+    # check for collisions
+    coll = len(km1) - len(indices)
+    if coll > 0:
+        print(f"{coll} hash collisions")
+
+    # reduce the updated arrays to exclude duplicated reverse comps
+    updated_edges = updated_edges[~np.all(updated_edges == 0, axis=1)]
+
+    # apply the updated edges to the adjacency matrix
+    self.adjacency_p[updated_edges[:, 0], updated_edges[:, 1]] = 1
+
+
+
+
+def count_paths(node, bloom_paths, t_solid):
+    # count the paths spanning a node
+    # - instead of estimating them from combinations of incident edges
+    # - actual k+1 mers are stored in a separate bloom filter and can be checked
+    # special treatment needed for palindromic kmers, otherwise they return each count twice
+    counts = [0] * 16
+    i = 0
+    if is_palindrome(node):
+        for km in kmer_neighbors_palindromic(node):
+            c = bloom_paths.get(km)
+            if c >= t_solid:
+                counts[i] = c
+            i += 1
+    else:
+        for km in kmer_neighbors(node):
+            c = bloom_paths.get(km)
+            if c >= t_solid:
+                counts[i] = c
+            i += 1
+    return counts
+
+
+
+def kmer_neighbors(km):
+    for x in 'ACGT':
+        for y in 'ACGT':
+            yield x + km + y
+
+
+def kmer_neighbors_palindromic(km):
+    pal_tuples = ["AA", "AC", "AG", "AT", "CA", "CC", "CG", "GA", "GC", "TA"]
+    for t in pal_tuples:
+        yield t[0] + km + t[1]
+
+
+
+def is_palindrome(seq):
+    if seq == reverse_complement(seq):
+        return True
+    else:
+        return False
+
+
+
+# MORE EFFICIENT PATH COUNTING
+# vectorised an indexing operation that was used within a loop
+
+
+def path_counting(self, updated_edges, incr_nodes, threshold):
+    # for all edges, which were either incremented or novel we need to check the path counts
+    # function to get path counts for all updated kmers in a batch
+
+    # gather all node indices for which we check the path counts
+    updated_nodes = np.concatenate((np.unique(updated_edges), incr_nodes), dtype="int")
+
+    # 17 slots, one for the index, rest for the path counts
+    updated_paths = np.zeros(shape=(updated_nodes.shape[0], 17), dtype='int64')
+
+    for i in range(len(updated_nodes)):
+        # now check the possible paths for both the lmer & rmer
+        node = updated_nodes[i]
+        paths = self.count_paths(node=node, t_solid=threshold)
+
+        # collect the indices and counts for the paths
+        updated_paths[i, 0] = node
+        updated_paths[i, 1:] = paths
+
+    return updated_paths
+
+
+
+
+def count_paths(self, node, t_solid):
+    # count the paths spanning a node
+    # - get the index of the node
+    # - check the adjacency for all existing neighbors
+    # - make all pairwise combinations of the existing neighbors
+    # - check the existance of paths in the adjacency_p
+    # can be used with a k-1mer or its index directly
+    if type(node) == str:
+        node_index = self.kmer2index(kmer=node, m=True)
+    elif type(node) == int or type(node) == np.int64:
+        node_index = node
+    else:
+        print("node neither str nor int")
+        return
+
+    neighbors = self.adjacency[node_index, :].nonzero()[1]
+
+    neighbor_combos = list(combinations(neighbors, 2))
+    counts = [0] * 16
+
+    for i in range(len(neighbor_combos)):
+        n1, n2 = neighbor_combos[i]
+        c = self.adjacency_p[n1, n2]
+        if c >= t_solid:
+            counts[i] = c
+
+    return counts
+
+
+
+# less efficient version of normalising matrix row wise
+
+#
+# def normalize_matrix_rowwise(mat):
+#     # rowsums for normalisation
+#     rowsums = csr_matrix(mat.sum(axis=1))
+#     rowsums.data = 1 / rowsums.data
+#     # find the diagonal matrix to scale the rows
+#     rowsums = rowsums.transpose()
+#     scaling_matrix = diags(rowsums.toarray()[0])
+#     norm = scaling_matrix.dot(mat)
+#     return norm
+
+# @profile
+# def filter_low_prob(prob_mat, threshold=0.001):
+#     # filter very low probabilities by setting them to 0
+#     # this prevents the probability matrix from getting denser and denser because
+#     # of circular structures and the absorbers
+#     # simply index into the data, where it is smaller than some threshold
+#     prob_mat.data[np.where(prob_mat.data < threshold)] = 0
+#     # unset the 0 elements
+#     prob_mat.eliminate_zeros()
+#     # normalise the matrix again by the rowsums
+#     prob_mat = normalize_matrix_rowwise(mat=prob_mat)
+#     return prob_mat
+
+
+
+
