@@ -1,20 +1,21 @@
 import line_profiler
 lp = line_profiler.LineProfiler()
+import longreadsim
+import numpy as np
+import os
+os.chdir("/home/lukas/Desktop/Aeons/24_gfa")
+cwd = os.getcwd()
 
-# run aeons until the dbg is initialised and updated once
-
+#%%
 # wrap functions
-up = lp(SparseGraph.update_benefit)
+# update = lp(SparseGraph.update_graph)
+# pc = lp(SparseGraph.path_counting)
+cp = lp(SparseGraph.count_paths)
 
+#%%
 # run code
-read_lengths, read_sequences, basesTOTAL = fq.get_batch()
-self.bloom.fill(reads=read_sequences)
-self.rld.record(reads=read_sequences)
-self.update_graph(updated_kmers=self.bloom.updated_kmers)
-self.update_graph_p(updated_kmers=self.bloom.updated_kmers_p)
-self.update_scores()
-# self.update_benefit()
-# this is the function that is replaced by the wrapped version to be profiled
-up(self=self)
+
+paths = cp(self=ar.dbg, node=node, t_solid=threshold)
+
 
 lp.print_stats()
