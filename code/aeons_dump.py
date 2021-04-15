@@ -2067,3 +2067,426 @@ def count_paths(self, node, t_solid):
 
 
 
+# approximation to U
+
+# FAILED FORWARD ACCUMULATION
+# # add up the partitions
+# arr_scores = np.zeros(len(traversal_scores))
+# # # add the first partition
+# arr_scores += np.squeeze(partition_score_cache[0])
+# #
+# #
+# for i in range(1, len(partition_target_cache) - 1):
+#     # to add the next partition, we need the targets of the previous partition
+#     part_scores = partition_score_cache[i]
+#     part_targets = partition_target_cache[i - 1]
+#     part_targetprobs = partition_targetprobs_cache[i - 1]
+#     # prev_targets = partition_target_cache[i-2]
+#
+#     print(np.where(partition_score_cache[i] > 1)[0].shape)
+#
+#     # grab the scores of the targets from previous partition
+#     # and multiply by the probability of arriving at that target
+#     target_scores = np.squeeze(part_scores[part_targets[:, 1]]) * part_targetprobs
+#
+#     # add to general score counter
+#     # arr_scores[part_targets[:, 0]] += target_scores
+#     np.add.at(arr_scores, part_targets[:, 0], target_scores)
+#
+#     print(np.max(arr_scores))
+#     np.unique(arr_scores, return_counts=True)
+#     # i+=1
+# #
+
+
+ # def next_iter():
+        #     # add up the partitions
+        #     arr_scores = np.zeros(len(traversal_scores))
+        #     # add the first partition
+        #     arr_scores += np.squeeze(partition_score_cache[0])
+        #
+        #     for i in range(1, len(partition_target_cache) - 1):
+        #         # to add the next partition, we need the targets of the previous partition
+        #         prev_targets = partition_target_cache[i - 1]
+        #         # we use these targets to index into the scores
+        #         part_scores = partition_score_cache[i]
+        #         if i == 1:
+        #             hop_scores = part_scores[prev_targets[:, 1]]
+        #             part_targetprobs = partition_targetprobs_cache[i - 1]
+        #         else:
+        #             targets = prev_targets[:, 1][new_starts]
+        #             hop_scores = part_scores[targets]
+        #
+        #             part_targetprobs = partition_targetprobs_cache[i - 1][targets]
+        #
+        #
+        #         print(np.where(hop_scores > 1)[0].shape)
+        #
+        #         # grab the scores of the targets from previous partition
+        #         # and multiply by the probability of arriving at that target
+        #         scores = np.squeeze(hop_scores) * part_targetprobs
+        #
+        #         # add to general score counter
+        #         # arr_scores[part_targets[:, 0]] += target_scores
+        #         np.add.at(arr_scores, prev_targets[:, 0], scores)
+        #         # arr_scores = arr_scores[prev_targets[:, 1]]
+        #         # arr_scores += scores
+        #
+        #         new_starts = prev_targets[:, 1]
+        #
+        #         print(np.max(arr_scores))
+        #         np.unique(arr_scores, return_counts=True)
+        #
+        #     return arr_scores
+        #
+        # arr_scores = next_iter()
+
+
+# UNSUCCESSFUL ITERATION OF ALGORITHM
+def traceback_hops(score_cache, target_cache, targetprobs_cache, nnodes):
+
+    score_cache_r = list(reversed(score_cache))
+    target_cache_r = list(reversed(target_cache))
+    prob_cache_r = list(reversed(targetprobs_cache))
+
+    prev_scores = np.zeros(nnodes)
+
+    # traceback time
+    for i in range(len(score_cache) - 1):
+        # get the targets of the previous step
+        ind = i + 1 # TODO orig
+        # ind = i
+        prev_targets = target_cache_r[ind][:, 1]
+        prev_targets_origin = target_cache_r[ind][:, 0]
+        target_probs = prob_cache_r[ind][prev_targets]
+
+        # use them to index the scores of current partition
+        scores = score_cache_r[i][prev_targets] * target_probs[:, None]
+        scores = np.squeeze(scores)
+
+        # reduce them with the origin indices
+        scores_red = np.bincount(prev_targets_origin, scores)
+
+        prev_scores = prev_scores[prev_targets]
+        prev_scores_red = np.bincount(prev_targets_origin, prev_scores)
+
+        scores_red = scores_red + prev_scores_red
+        prev_scores = scores_red.copy()
+
+        # print(np.where(prev_scores > 0.01)[0].shape)
+        # print(np.max(scores_red))
+        # print(np.max(scores))
+        # print(unq(scores_red))
+        # print()
+        # plt.plot(prev_scores, '.')
+        # plt.show()
+        # sleep(1)
+        # i += 1
+        # TODO tmp
+        # utility = np.squeeze(prev_scores)
+        # # utility += self.dbg.edge_scores
+        # culdesac_edges = np.all(np.isin(edge_mapping[:, 1:], culdesac), axis=1)
+        # em_notri = edge_mapping[~culdesac_edges, :]
+        # self.dbg.benefit_raw[em_notri[:, 1], em_notri[:, 2]] = utility[~culdesac_edges]
+        # self.dbg.benefit_raw.eliminate_zeros()
+        # self.dbg.gt_format(mat=self.dbg.benefit_raw)
+        # plot_benefit(graph=self.dbg.gtg, name="benefit_raw")
+
+
+    # last partition (first steps)
+    scores = score_cache_r[-1]
+
+    # scores_red += np.squeeze(scores)
+    prev_scores += np.squeeze(scores)
+
+    # print(np.where(prev_scores > 0.2)[0].shape)
+    # print(np.max(scores))
+    # print(np.max(prev_scores))
+    # print(unq(prev_scores))
+    # plt.plot(prev_scores, '.')
+    # plt.show()
+
+    return prev_scores
+
+
+# YET ANOTHER UNSUCCESSFUL ATTEMPT
+# used after filling the caches to work backwards from the last layer
+
+  # grab the last scores and work towards start
+    # prev = np.zeros(len(mapping_cache[-1]))
+    # i = 1
+    # for i in range(1, len(mapping_cache)):
+    #     targets = expand_cache[-i]
+    #     target_probs = tp_cache[-i]
+    #     unq(target_probs)
+    #
+    #     scores = np.squeeze(score_cache[-i][targets])
+    #     unq(scores)
+    #
+    #     scores = scores * target_probs
+    #     unq(scores)
+    #
+    #     mapping = mapping_cache[-i]
+    #
+    #     prev = prev * target_probs
+    #     scores = scores + prev
+    #
+    #     scores_red = np.bincount(mapping, scores)
+    #     print(np.unique(scores_red, return_counts=True))
+    #
+    #
+    #     prev = scores_red.copy()
+    #
+    #     np.unique(prev, return_counts=True)
+    #     print(prev.shape)
+    #     plt.plot(prev, '.')
+    #     plt.show()
+    #     i+= 1
+
+        # prev_add = prev[targets]
+        # new_scores = prev_add + scores
+        # mapping = mapping_cache[-i]
+        # scores_red = np.bincount(mapping, new_scores)
+        # prev = scores_red.copy()
+    #
+    #     print(np.max(prev_add))
+    #     print(np.max(scores))
+    #     print(np.max(new_scores))
+    #     print(np.max(scores_red))
+    #
+    #     print(unq(prev))
+    #     print(prev.shape)
+    #     print()
+    #     plt.plot(prev, '.')
+    #     plt.show()
+    #     i+= 1
+    #
+    #     utility = np.squeeze(acc)
+    #     # utility += self.dbg.edge_scores
+    #     culdesac_edges = np.all(np.isin(edge_mapping[:, 1:], culdesac), axis=1)
+    #     em_notri = edge_mapping[~culdesac_edges, :]
+    #     self.benefit_raw[em_notri[:, 1], em_notri[:, 2]] = utility[~culdesac_edges]
+    #     self.benefit_raw.eliminate_zeros()
+    #     self.gt_format(mat=self.benefit_raw)
+    #     plot_benefit(graph=self.gtg, name="benefit_raw")
+
+    #
+    # final backwards mapping
+    # mapping = mapping_cache[0]
+    # targets = expand_cache[0]
+    # tp = tp_cache[0]
+    # prev = prev * tp
+    # prev = np.bincount(mapping, prev)
+
+    # prev += acc
+
+    # otargets = target_cache[0][:, 1]
+    # prev = prev[otargets]
+    # prev = np.bincount(mapping, prev)
+    #
+    #
+    # plt.plot(prev, '.')
+    # plt.show()
+    #
+    # utility = np.squeeze(prev)
+    # # utility += self.dbg.edge_scores
+    # culdesac_edges = np.all(np.isin(edge_mapping[:, 1:], culdesac), axis=1)
+    # em_notri = edge_mapping[~culdesac_edges, :]
+    # self.benefit_raw[em_notri[:, 1], em_notri[:, 2]] = utility[~culdesac_edges]
+    # self.benefit_raw.eliminate_zeros()
+    # self.gt_format(mat=self.benefit_raw)
+    # plot_benefit(graph=self.gtg, name="benefit_raw")
+
+# REMNANT LINES OF THE first working version that were too slow and replaced by other lines
+# grabbing targets from the target cache made with np.split
+# new_targets = np.array(target_cache2[i], dtype=object)[targets]
+# nt_flat = np.concatenate(new_targets)
+
+# target_multiplicity = np.array([a.shape[0] for a in new_targets])
+
+# getting probabilities from the target_probs cache made from the lil matrix
+# target_probs = np.hstack(targetprobs_cache2[i][targets])
+# tps = targetprobs_cache2[i][targets]
+# target_probs = np.concatenate(tps)
+
+
+# graph hopping
+
+# saving the targets for the cache
+# targets = np.swapaxes(np.array(hp.nonzero()), 0, 1)
+# targets2 = np.split(hp.indices, hp.indptr)[1:-1]  # TODO this is slow
+
+# we also need to take into account the probability of each of these targets
+# by indexing into the probability hashimoto or just use the data array of the hp
+# target_probs = hp.data
+# target_probs2 = hp.tolil().data  # TODO this is also slow
+
+
+
+
+# version before the improved algorithm
+def process_batch(self, reads=None, no_incr=False):
+    print(f'BATCH {self.batch}  ' + '#' * 30)
+
+    # first get a new batch of reads from the mmap
+    if not reads:
+        read_sequences = self.fq.get_batch()
+        self.read_sequences = read_sequences
+    else:
+        read_sequences = reads
+
+    # map them to the graph as truncated
+    gaf = self.mapper.map(reads=read_sequences, truncate=True)
+
+    # this then modifies the reads as if they had gone through the acceptance/rejection
+    reads_decision = self.make_decision(gaf=gaf, read_sequences=read_sequences)
+
+    # then we map again with whatever we have after decision making
+    gaf = self.mapper.map(reads=reads_decision, truncate=False)
+
+    # now check which reads mapped and which ones are getting decomposed
+    self.check_mappings(gaf=gaf, reads=reads_decision, no_incr=no_incr)
+
+    ########################
+
+    # fill the bloom filter with new seqs and update the read length distribution
+    self.bloom.fill(reads=reads_decision)
+    self.dbg.rld.record(reads=reads_decision)
+
+    # new updating function that does not rely on the bloom for all counts
+    self.dbg.update_graph(increments=self.increments,
+                          increments_p=self.increments_p,
+                          updated_kmers=self.updated_kmers,
+                          updated_kmers_p=self.updated_kmers_p)
+
+
+    # update the scores of nodes with new path counts
+    self.dbg.update_scores()
+    # TODO tmp to keep scores at tips down
+    self.dbg.scores.data[self.dbg.scores.data > 2] = np.median(self.dbg.scores.data)
+
+    # update the benefit at each node
+    self.dbg.update_benefit()
+
+    # find the next strategy
+    self.dbg.find_strat()
+
+    ###########################
+
+    # update the files for mapping
+    self.gfa.write_segments(kmer_dict=self.dbg.kmer_dict)
+    self.gfa.write_links(updated_edges=self.dbg.updated_edges)
+    self.gfa.write_links(updated_edges=self.dbg.nov_edges)
+    self.gfa.write_gfa()
+
+    # create a graph for viz
+    # self.dbg.gt_format()
+    # self.dbg.gt_format(mat=self.dbg.benefit_raw)
+
+    ############################
+
+    # periodically update rld
+    if (self.batch + 1) % 10 == 0:
+        self.dbg.rld.update()
+
+    self.update_times(read_sequences=read_sequences, reads_decision=reads_decision)
+    self.write_batch(read_sequences=read_sequences, reads_decision=reads_decision)
+    self.batch += 1
+
+    #############################
+    ind = nonzero_indices(self.dbg.adjacency)
+    print(f'occupancy: {ind.shape[0] / self.dbg.size} \n')
+    print()
+
+
+
+# @profile
+# before improved algorithm - this version does many many matrix multiplications
+def update_benefit(self):
+    # calculate both the probability of transitioning to a node and arriving at that node
+
+    # first create the absorbing structures at the tips
+    # returns copies of both the graph and the scores
+    adj, scores, culdesac = self.add_absorbers()
+
+    # transform adjacency to hashimoto matrix
+    # and return the mapping of edges to their source and target vertices
+    hashimoto, edge_mapping = fast_hashimoto(adj)
+
+    # using the k+1mer graph check which transitions actually don't exist
+    hashimoto = self.eliminate_paths(hashimoto=hashimoto, edge_mapping=edge_mapping, culdesac=culdesac)
+
+    # turn hashimoto into a probability matrix (rows sum to 1)
+    # also normalizes per row and filters low probabilities
+    hp = probability_hashimoto(hashimoto=hashimoto, edge_mapping=edge_mapping, adj=adj)
+
+    # keep a copy of the basic matrix for multiplication
+    hp_base = deepcopy(hp)
+
+    # get the scores for each edge (rather the score of their target node)
+    # simply index into the score vector from the absorber addition with the edge mapping
+    edge_scores = np.squeeze(scores[edge_mapping[:, 2]].A)
+
+    # first transition with H^1
+    # I think arrival scores can be a vector instead of a matrix?
+    arrival_scores = hp.multiply(edge_scores).tocsr()  # * ccl[0]
+    arr_scores = np.array(arrival_scores.sum(axis=1))
+
+    # # In this function we calculate both utility and S_mu at the same time
+    # s_mu = deepcopy(arrival_scores).tocsr()
+    s_mu = 0  # dummy init
+
+    # then transition each step of the ccl
+    ccl = self.rld.ccl
+    n_steps = ccl.shape[0]
+
+    for i in range(1, n_steps):
+        # increment transition step
+        # (multiplication instead of power for efficiency)
+        hp = hp @ hp_base
+
+        # reduce the density of the probability matrix
+        # if i % 5 == 0:
+        hp = filter_low_prob(hp)
+
+        # multiply by scores and add - this is element-wise per row
+        transition_score = hp.multiply(edge_scores).tocsr()
+
+        # # calculate smu on the fly
+        # if i <= self.rld.mu:
+        #     s_mu += transition_score
+
+        # element-wise multiplication of csr matrix and float
+        tsp = transition_score.multiply(ccl[i]).tocsr()
+        arr_scores += np.array(tsp.sum(axis=1))
+        # since we calculate s_mu on the fly, we save it once i reaches mu
+        if i == self.rld.mu:
+            s_mu = arr_scores.copy()
+
+
+    # row sums are utility for each edge
+    # utility = np.squeeze(np.array(arrival_scores.sum(axis=1)))
+    utility = np.squeeze(arr_scores)
+    s_mu_vec = np.squeeze(s_mu)
+    # add back the original score of the starting node
+    utility += edge_scores
+    s_mu_vec += edge_scores
+
+    # not sure what the proper data structure is for this
+    # but maybe return the edge mapping & benefit & smu, all with culdesac edges removed
+    # or a dictionary that maps (source, target) -> benefit
+    # or just another sparse matrix for each of them
+    # remove culdesac edges
+    culdesac_edges = np.all(np.isin(edge_mapping[:, 1:], culdesac), axis=1)
+    em_notri = edge_mapping[~culdesac_edges, :]
+    # do not save the benefit and s_mu separately, but already subtract smu
+    self.benefit[em_notri[:, 1], em_notri[:, 2]] = utility[~culdesac_edges] - s_mu_vec[~culdesac_edges]
+    self.benefit.eliminate_zeros()
+
+    # TODO tmp
+    # also save the raw benefit for now - plotting etc
+    # self.benefit_raw[em_notri[:, 1], em_notri[:, 2]] = utility[~culdesac_edges]
+    # self.benefit_raw.eliminate_zeros()
+
+    # also keep track of the average benefit when all fragments are rejected (Ubar0)
+    self.ubar0 = np.mean(s_mu_vec)
