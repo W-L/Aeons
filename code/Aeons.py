@@ -15,7 +15,7 @@ from itertools import combinations
 # from difflib import SequenceMatcher
 
 # CUSTOM IMPORTS
-from row_norm import row_norm
+from rownorm import row_norm
 
 # NON STANDARD LIBRARY
 import numpy as np
@@ -24,17 +24,16 @@ from scipy.sparse import csr_matrix, coo_matrix  # , diags, tril
 # from scipy import sparse
 # from scipy.stats import dirichlet
 import graph_tool as gt
-from graph_tool.all import graph_draw
 from graph_tool.topology import label_components
 import khmer
 import matplotlib.pyplot as plt
-from matplotlib import cm
+
 # backend for interactive plots
 # plt.switch_backend("GTK3cairo")
 # plt.switch_backend("Qt5cairo")
 
-# import line_profiler
-
+import line_profiler
+# import memory_profiler
 
 
 
@@ -62,7 +61,7 @@ class Constants:
         self.err = err
         self.errD = 0.0
 
-        self.prior = 0.01
+        self.prior = 1e-10
         self.perc = 0.0
 
         self.size = size
@@ -94,6 +93,7 @@ class SparseGraph:
     def __init__(self, bloom, const, size=1e5):
         # size determines the shape of multiple objects and also the collision probability
         size = int(size)
+        self.size = size
         self.prior = const.prior
 
         # initialise time cost   - not super accurate probably atm
@@ -117,6 +117,8 @@ class SparseGraph:
         self.scores = csr_matrix((size, 1), dtype=np.float64)
         self.benefit = csr_matrix((size, size), dtype=np.float64)
         self.strat = csr_matrix((size, size), dtype=np.bool_)
+
+        self.benefit_raw = csr_matrix((size, size), dtype=np.float64)
 
         # initialise the score array for fast indexing
         self.score_array = init_s_array(prior=self.prior, paths=16, maxcount=10)
@@ -217,7 +219,7 @@ class SparseGraph:
         # check for collisions
         coll = len(km1) - len(indices)
         if coll > 0:
-            print(f"{coll} hash collisions")
+            print(f"hash collisions: {coll}")
 
         # apply the updated edges to the adjacency matrix
         # np.unique to circumvent weird behaviour of += 1 with duplicated indices
@@ -282,7 +284,7 @@ class SparseGraph:
         # check for collisions
         coll = len(km1) - len(indices)
         if coll > 0:
-            print(f"{coll} hash collisions")
+            print(f"hash collisions: {coll}")
 
         # reduce the updated arrays to exclude duplicated reverse comps
         # updated_edges = updated_edges[~np.all(updated_edges == 0, axis=1)]
@@ -437,22 +439,28 @@ class SparseGraph:
     def gt_format(self, mat=None):
         if mat is None:
             mat = self.adjacency
-        # for testing, transfrom the matrix to an adjacency list so it can be visualised with gt
+
+        # transfrom the matrix to an adjacency list so it can be visualised with gt
         # init graph
         gtg = gt.Graph(directed=False)
 
         # init edge weights
-        eprop = gtg.new_edge_property("int")
-        eprop.a.fill(0)
+        bprop = gtg.new_edge_property("float")
+        bprop.a.fill(0)
+        sprop = gtg.new_edge_property("float")
+        sprop.a.fill(0)
         # internalise the property
-        gtg.ep["weights"] = eprop
+        gtg.ep["weights"] = bprop
+        gtg.ep["strat"] = sprop
+
 
         cx = mat.tocoo()
+        strat_coo = self.strat.tocoo()
         edges = []
-        for i, j, v in zip(cx.row, cx.col, cx.data):
-            edges.append((str(i), str(j), v))
+        for i, j, v, s in zip(cx.row, cx.col, cx.data, strat_coo.data):
+            edges.append((str(i), str(j), v, s))
 
-        kmer_indices = gtg.add_edge_list(edges, hashed=True, hash_type="string", eprops=[gtg.ep.weights])
+        kmer_indices = gtg.add_edge_list(edges, hashed=True, hash_type="string", eprops=[gtg.ep.weights, gtg.ep.strat])
 
         ki_list = []
         for ki in kmer_indices:
@@ -465,9 +473,9 @@ class SparseGraph:
         ki_sorting = np.argsort(ki)
 
         # add scores as property for plotting
-        sprop = gtg.new_vertex_property("float")
-        sprop.a[ki_sorting] = self.scores.data
-        gtg.vp["scores"] = sprop
+        scprop = gtg.new_vertex_property("float")
+        scprop.a[ki_sorting] = self.scores.data
+        gtg.vp["scores"] = scprop
 
         # add pathsum as property for plotting
         pprop = gtg.new_vertex_property("float")
@@ -482,15 +490,15 @@ class SparseGraph:
 
         comp_label, comp_hist = label_components(gtg, directed=False)
         ncomp = len(set(comp_label))
-        print(ncomp)
-        print(comp_hist)
+        # print(ncomp)
+        print(f'component histogram: {comp_hist}')
 
         # mean weight
-        mean_weight = np.mean(gtg.ep.weights.a)
-        print(mean_weight)
+        # mean_weight = np.mean(gtg.ep.weights.a)
+        # print(mean_weight)
 
         self.gtg = gtg
-
+        return gtg
 
 
 
@@ -534,9 +542,9 @@ class SparseGraph:
 
 
         comp_label, comp_hist = label_components(gtg, directed=False)
-        ncomp = len(set(comp_label))
-        print(ncomp)
-        print(comp_hist)
+        # ncomp = len(set(comp_label))
+        # print(ncomp)
+        # print(comp_hist)
 
         self.gtg_p = gtg
 
@@ -561,18 +569,19 @@ class SparseGraph:
         abs_vertices = set()
         abs_edges = np.zeros(shape=(n_culdesac * 3, 2), dtype="int")
 
+        # find free indices where we can put the absorbers
+        # uses the fact that indptr stays the same if a row has no values in it
+        # only look into the first few indptr at first
+        free_indices = np.where(np.diff(self.adjacency.indptr[: n_culdesac * 4]) == 0)[0]
+        # if there were not enough free_indices at this point look into the whole thing
+        if free_indices.shape[0] < (n_culdesac + 1) * 2:
+            free_indices = np.where(np.diff(self.adjacency.indptr) == 0)[0][(n_culdesac + 1) * 2]
+
+
         for i in range(n_culdesac):
-            # find available indices for the absorbers
-            # brute force search
             c = culdesac[i]
-
-            abs_a = c + 1
-            while self.adjacency[abs_a, :].sum() != 0:
-                abs_a += 1
-
-            abs_b = abs_a + 1
-            while self.adjacency[abs_b, :].sum() != 0:
-                abs_b += 1
+            abs_a = free_indices[i]
+            abs_b = free_indices[i + n_culdesac]
 
             # add the new indices to a set
             abs_vertices.update([abs_a, abs_b])
@@ -582,7 +591,6 @@ class SparseGraph:
             abs_edges[i + n_culdesac] = (c, abs_b)
             abs_edges[i + n_culdesac * 2] = (abs_a, abs_b)
 
-
         # duplicate and flip for symmetric (reverse comp) edges
         abs_edges = np.vstack((abs_edges, np.fliplr(abs_edges)))
         # create a copy of the graph and apply new edges
@@ -590,14 +598,15 @@ class SparseGraph:
         adjacency_absorbers[abs_edges[:, 0], abs_edges[:, 1]] = 99
 
         # transfer scores to absorbers
-        culdesac_scores = np.repeat(self.scores[culdesac].toarray().squeeze(), 2)
+        # culdesac_scores = np.repeat(self.scores[culdesac].toarray().squeeze(), 2)
         # make indices for the new vertices from the set
         abs_ind = list(abs_vertices)
         scores_absorbers = self.scores.copy()
 
         # TODO tmp deactivate boost for the component ends
-        culdesac_scores = np.full(shape=(culdesac.shape[0] * 2), fill_value=np.min(self.scores.data))
-        scores_absorbers[culdesac] = np.min(self.scores.data)  # TODO tmp
+        fill_val = np.median(self.scores.data)
+        culdesac_scores = np.full(shape=(culdesac.shape[0] * 2), fill_value=fill_val)
+        scores_absorbers[culdesac] = fill_val  # TODO tmp
         scores_absorbers[abs_ind] = culdesac_scores
 
         # combine the absorber vertices and culdesac for returning
@@ -629,57 +638,26 @@ class SparseGraph:
         # also normalizes per row and filters low probabilities
         hp = probability_hashimoto(hashimoto=hashimoto, edge_mapping=edge_mapping, adj=adj)
 
-        # keep a copy of the basic matrix for multiplication
-        hp_base = deepcopy(hp)
-
         # get the scores for each edge (rather the score of their target node)
         # simply index into the score vector from the absorber addition with the edge mapping
-        edge_scores = np.squeeze(scores[edge_mapping[:, 2]].A)
+        self.edge_scores = np.squeeze(scores[edge_mapping[:, 2]].A)
 
-        # first transition with H^1
-        # I think arrival scores can be a vector instead of a matrix?
-        arrival_scores = hp.multiply(edge_scores).tocsr()  # * ccl[0]
-        arr_scores = np.array(arrival_scores.sum(axis=1))
+        # modify the partition lengths according to the approximation and the reduction factor
+        self.part_lengths, self.probs = prepare_partitions(ccl=self.rld.ccl, mu=self.rld.mu)
 
-        # # In this function we calculate both utility and S_mu at the same time
-        # s_mu = deepcopy(arrival_scores).tocsr()
-        s_mu = 0  # dummy init
+        # perform the graph hopping by matrix multiplications to fill the caches
+        score_cache, hp_cache = self.graph_hopping(hp=hp)
 
-        # then transition each step of the ccl
-        ccl = self.rld.ccl
-        n_steps = ccl.shape[0]
-
-        for i in range(1, n_steps):
-            # increment transition step
-            # (multiplication instead of power for efficiency)
-            hp = hp @ hp_base
-
-            # reduce the density of the probability matrix
-            # if i % 5 == 0:
-            hp = filter_low_prob(hp)
-
-            # multiply by scores and add - this is element-wise per row
-            transition_score = hp.multiply(edge_scores).tocsr()
-
-            # # calculate smu on the fly
-            # if i <= self.rld.mu:
-            #     s_mu += transition_score
-
-            # element-wise multiplication of csr matrix and float
-            tsp = transition_score.multiply(ccl[i]).tocsr()
-            arr_scores += np.array(tsp.sum(axis=1))
-            # since we calculate s_mu on the fly, we save it once i reaches mu
-            if i == self.rld.mu:
-                s_mu = arr_scores.copy()
-
+        # using the caches collected before, figure out the scores of each node
+        nnodes = self.edge_scores.shape[0]
+        arr_scores = better_hops(score_cache=score_cache, hp_cache=hp_cache, nnodes=nnodes)
 
         # row sums are utility for each edge
-        # utility = np.squeeze(np.array(arrival_scores.sum(axis=1)))
         utility = np.squeeze(arr_scores)
-        s_mu_vec = np.squeeze(s_mu)
+        s_mu_vec = np.squeeze(self.s_mu)
         # add back the original score of the starting node
-        utility += edge_scores
-        s_mu_vec += edge_scores
+        utility += self.edge_scores
+        s_mu_vec += self.edge_scores
 
         # not sure what the proper data structure is for this
         # but maybe return the edge mapping & benefit & smu, all with culdesac edges removed
@@ -691,8 +669,75 @@ class SparseGraph:
         # do not save the benefit and s_mu separately, but already subtract smu
         self.benefit[em_notri[:, 1], em_notri[:, 2]] = utility[~culdesac_edges] - s_mu_vec[~culdesac_edges]
         self.benefit.eliminate_zeros()
+
+        # TODO tmp
+        # also save the raw benefit for now - plotting etc
+        # self.benefit_raw[em_notri[:, 1], em_notri[:, 2]] = utility[~culdesac_edges]
+        # self.benefit_raw.eliminate_zeros()
+
         # but also keep track of the average benefit when all fragments are rejected (Ubar0)
         self.ubar0 = np.mean(s_mu_vec)
+
+
+    # @profile
+    def graph_hopping(self, hp):
+        # the number of matrix multiplications we need to perform to cover all hops
+        maxsteps = int(self.part_lengths[0] + 1)
+
+        # init caches that hold the scores and the hashimoto for all layers
+        cache_size = self.probs.shape[0]
+        score_cache = [0] * cache_size
+        hp_cache = [0] * cache_size
+
+        # how much steps do we take per partition?
+        partition_order = np.argsort(self.part_lengths)
+        partition_steps = self.part_lengths[partition_order]
+
+        # keep a copy of the basic matrix for multiplication
+        hp_base = deepcopy(hp)
+
+        # first transition with H^1
+        # multiply the scores of traversing edges with the probability state distribution
+        arrival_scores = hp.multiply(self.edge_scores).tocsr()
+        traversal_scores = np.array(arrival_scores.sum(axis=1))
+
+        self.s_mu = 0
+
+        # fill the caches everytime the length of a partition is hit
+        for i in range(1, maxsteps + 1):
+
+            # calculate s_mu on the fly, i.e. save it once i reaches mu
+            if i == self.rld.mu:
+                self.s_mu = traversal_scores.copy()
+
+            # check if any of the partition lengths has been reached
+            reached = (i) == partition_steps  #  - 1
+            if np.any(reached):
+                # which partition has been reached?
+                partition_num = partition_order[np.where(reached)[0]]
+
+                # to get the targets and their probabilities at each layer we save the hashimoto
+                hpc = deepcopy(hp)
+
+                for pn in partition_num:
+                    # save the score after X steps and multiply with probability of traversing that partition
+                    score_cache[pn] = traversal_scores.copy() * self.probs[pn]
+                    hp_cache[pn] = hpc
+
+            # transition another step of the hashimoto (matrix multiplication)
+            hp = hp @ hp_base
+
+            # reduce the density of the probability matrix and normalise
+            hp = filter_low_prob(hp)
+
+            # multiply by scores (element-wise per row)
+            transition_score = hp.multiply(self.edge_scores).tocsr()
+
+            # element-wise multiplication of csr matrix and float
+            traversal_scores += np.array(transition_score.sum(axis=1))
+
+        # return the scores and the state of the hashimoto at each layer
+        return score_cache, hp_cache
 
 
 
@@ -778,7 +823,7 @@ class SparseGraph:
         self.strat[reject_indices[:, 0], reject_indices[:, 1]] = 0
 
         # print number of accepted and fraction of accepted
-        print(f'Accepting nodes: {strat_size}, {strat_size / uot.shape[0]}')
+        print(f'Accepting nodes: {strat_size}, {round(strat_size / uot.shape[0], 5)}')
 
 
 
@@ -788,8 +833,8 @@ class Bloom:
     """
     def __init__(self, k, genome_estimate):
         # constants and vars for the size of the bloom filter
-        self.target_table_size = 5e6  # TODO test these params (and check paper)
-        self.num_tables = 5
+        self.target_table_size = 5e7  # TODO test these params (and check paper)
+        self.num_tables = 6
         self.k = k
         self.genome_estimate = genome_estimate
 
@@ -801,10 +846,6 @@ class Bloom:
         # once this is too big, write them to file and pass trough hash function again
         self.obs_kmers = dict()
         # self.obs_kmers_p1 = set()
-
-        # legacy
-        self.kcount = 0
-
 
 
 
@@ -832,14 +873,18 @@ class Bloom:
         # loop through all reads
         for _, seq in reads.items():
             # split the read into its kmers
-            kmers = filt.get_kmers(seq)
+            try:
+                kmers = filt.get_kmers(seq)
+            except ValueError:
+                continue
+
             # add to the filter
             try:
                 filt.consume(seq)
-
             except ValueError:
                 # print("read shorter than k")
                 continue
+
             updated_kmers.update(kmers)
 
         # return instead of attribute to make it more general
@@ -953,6 +998,7 @@ class LengthDist:
         # correct numerical errors, that should be 0.0
         ccl[ccl < 1e-10] = 0
         # cut distribution off at some point to reduce complexity of calculating U
+        ccl[ccl < 1e-6] = 0
         # or just trim zeros
         ccl = np.trim_zeros(ccl, trim='b')
         self.ccl = ccl
@@ -1053,9 +1099,9 @@ class GraphMapper:
             self.fa_tmp = fa_tmp
 
         if not gaf:
-            self.gaf = "mapped"
+            self.gaf = "mapped.gaf"
         else:
-            self.gaf = gaf
+            self.gaf = f'{gaf}.gaf'
 
 
 
@@ -1082,7 +1128,7 @@ class GraphMapper:
 
     def map(self, reads, truncate=False):
         # if the graph file was just built, skip mapping
-        if self.ref.size() < 20:
+        if self.ref.size() < 50:
             return None
 
         # params might need tuning, but don't seem to have too much of an effect
@@ -1092,21 +1138,20 @@ class GraphMapper:
         # create a tmp fasta file for truncated and full length
         fasta = self.write_fasta(reads=reads, truncate=truncate)
 
-        gaf = f'{self.gaf}.gaf'
-
         # build the command
-        ga = f"{self.exe} -g {self.gfa} -a {gaf} -f {fasta}" \
+        ga = f"{self.exe} -g {self.gfa} -a {self.gaf} -f {fasta}" \
              f" -x dbg --seeds-minimizer-length {length} --seeds-minimizer-windowsize {wsize}"
 
         # execute the mapper
         out, err = execute(ga)
         self.out = out
         self.err = err
-        return gaf
+        return self.gaf
 
 
-
-
+    def size(self):
+        # return size of the mapping file
+        return os.path.getsize(self.gaf)
 
 
 
@@ -1127,6 +1172,15 @@ class AeonsRun:
         # for writing batches to files
         self.batch = 0
         self.fa_out = "seq_data"
+        self.cache_naive = dict()
+        self.cache_aeons = dict()
+
+        # after how much time should the sequenced be written to file
+        # dump time is incremented every time a batch is written, which happens once that is overcome
+        self.dump_every = int(1e5)
+        self.dump_number_naive = 1
+        self.dump_number_aeons = 1
+        self.dump_time = self.dump_every
 
         # for keeping track of the sequencing time
         self.time_naive = 0
@@ -1145,11 +1199,15 @@ class AeonsRun:
 
 
 
+    def process_batch(self, reads=None, no_incr=False):
+        print(f'BATCH {self.batch}  ' + '#' * 30)
 
-    # @profile
-    def process_batch(self):
         # first get a new batch of reads from the mmap
-        read_sequences = self.fq.get_batch()
+        if not reads:
+            read_sequences = self.fq.get_batch()
+            self.read_sequences = read_sequences
+        else:
+            read_sequences = reads
 
         # map them to the graph as truncated
         gaf = self.mapper.map(reads=read_sequences, truncate=True)
@@ -1161,7 +1219,7 @@ class AeonsRun:
         gaf = self.mapper.map(reads=reads_decision, truncate=False)
 
         # now check which reads mapped and which ones are getting decomposed
-        self.check_mappings(gaf=gaf, reads=reads_decision)
+        self.check_mappings(gaf=gaf, reads=reads_decision, no_incr=no_incr)
 
         ########################
 
@@ -1175,9 +1233,14 @@ class AeonsRun:
                               updated_kmers=self.updated_kmers,
                               updated_kmers_p=self.updated_kmers_p)
 
-
         # update the scores of nodes with new path counts
         self.dbg.update_scores()
+        # TODO tmp to keep scores at tips down
+        self.dbg.scores.data[self.dbg.scores.data > 2] = np.median(self.dbg.scores.data)
+
+        # TODO tmp
+        # self.dbg.scores[361504] = 3
+        # self.dbg.scores[708901] = 3
 
         # update the benefit at each node
         self.dbg.update_benefit()
@@ -1194,9 +1257,8 @@ class AeonsRun:
         self.gfa.write_gfa()
 
         # create a graph for viz
-        self.dbg.gt_format()
-        self.dbg.gt_format(mat=self.dbg.benefit)
-        # self.gt_format(mat=self.strat)
+        # self.dbg.gt_format()
+        # self.dbg.gt_format(mat=self.dbg.benefit_raw)
 
         ############################
 
@@ -1208,15 +1270,34 @@ class AeonsRun:
         self.write_batch(read_sequences=read_sequences, reads_decision=reads_decision)
         self.batch += 1
 
+        #############################
+        ind = nonzero_indices(self.dbg.adjacency)
+        print(f'occupancy: {ind.shape[0] / self.dbg.size} \n')
+        print()
+
 
 
     def make_decision(self, gaf, read_sequences):
         # decide accept/reject for each read
-        if gaf is None:
+
+        # TODO looks like GA now produces an empty, non-binary file if nothing maps
+        # so these two are not needed anymore
+        # if gaf is None:
+        #     return read_sequences
+
+        # if is_binary(gaf):
+        #     return read_sequences
+
+        if self.mapper.size() < 10:
+            return read_sequences
+
+        if self.batch < 3:
             return read_sequences
 
         reads_decision = dict()
         strat = self.dbg.strat
+
+        reject_count = 0
 
         # loop over gaf entries with generator function
         gaf_file = open(gaf, 'r')
@@ -1225,18 +1306,10 @@ class AeonsRun:
             # record = list(parse_gaf(gaf_file))[4]
             # print(record)
 
-            # filter by mapping quality
-            # if record["mapping_quality"] < 55:
-            #     continue
-
-            # decision process
-            # TODO check if this handles strands correctly
-            # strand = 0 if record['strand'] == '+' else 1
-
-            # skip very short alignments
-            # this does not belong here? we truncate the reads to mu before
-            # if record['n_matches'] < self.const.k:
-            #     continue
+            # only consider alignments with identity > 0.9
+            # i.e. only reject if we are sure where the read comes from
+            if record['idt'] < 0.9:
+                continue
 
             # extract the first transition and check what the strategy is for that edge
             if record['path'].startswith('>'):
@@ -1259,6 +1332,7 @@ class AeonsRun:
             # REJECT
             else:
                 record_seq = read_sequences[record["qname"]][: self.const.mu]
+                reject_count += 1
 
             # append the read's sequence to a new dictionary of the batch after decision making
             reads_decision[record['qname']] = record_seq
@@ -1280,6 +1354,7 @@ class AeonsRun:
         # print(f'reads lengths before {osl}'
         #       f'reads lengths after  {nsl}')
 
+        print(f'rejecting: {reject_count}')
         return reads_decision
 
 
@@ -1300,10 +1375,10 @@ class AeonsRun:
 
         # keep track of which edge counts to increment in the graph
         for record in parse_gaf(gaf_file):
-            # record = list(parse_gaf(gaf_file))[4]
+            # record = list(parse_gaf(gaf_file))[0]
 
-            # skip very short alignments
-            if record['n_matches'] < self.const.k:
+            # skip very short alignments only if the read is actually not that short
+            if record['n_matches'] < self.const.k and record['qlen'] > self.const.k * 2:
                 continue
 
             # only consider alignments with identity > 0.9
@@ -1349,15 +1424,19 @@ class AeonsRun:
 
 
 
-    def check_mappings(self, gaf, reads):
+    def check_mappings(self, gaf, reads, no_incr=False):
         # wrapper that checks which reads mapped to the graph, and thus their edges are simply incremented
-        if gaf is not None:
+        # TODO this is gross
+        # if gaf is not None and not is_binary(gaf) and not no_incr and not self.mapper.size() < 10 and self.batch > 3:
+        if not no_incr and not self.mapper.size() < 10 and self.batch > 3:
             increments, increments_p, processed_reads, partial_mappers = self.collect_mappings(gaf)
         else:
             increments, increments_p, processed_reads, partial_mappers = [], [], set(), dict()
 
         # filter out mapped reads
-        reads_filt = filter_unmapped_reads(reads=reads, processed_reads=processed_reads, partial_mappers=partial_mappers)
+        reads_filt = filter_unmapped_reads(reads=reads,
+                                           processed_reads=processed_reads,
+                                           partial_mappers=partial_mappers)
 
         # filtered reads are decomposed and added to the graph as kmers
         updated_kmers, updated_kmers_p = decompose_into_kmers(reads=reads_filt, k=self.const.k)
@@ -1388,9 +1467,13 @@ class AeonsRun:
 
 
     def write_batch(self, read_sequences, reads_decision):
-        # write the sequencing data to files to feed it to assembler later
-        file_naive = f'{self.fa_out}_{self.batch}_naive.fa'
-        file_aeons = f'{self.fa_out}_{self.batch}_aeons.fa'
+        # add the current sequences to the cache
+        for rid, seq in read_sequences.items():
+            self.cache_naive[rid] = seq
+
+        for rid, seq in reads_decision.items():
+            self.cache_aeons[rid] = seq
+
 
         def write_seqdict(filename, seqdict):
             with open(filename, "w") as f:
@@ -1398,10 +1481,26 @@ class AeonsRun:
                     fa_line = f'>{rid}\n{seq}\n'
                     f.write(fa_line)
 
-        write_seqdict(file_naive, read_sequences)
-        write_seqdict(file_aeons, reads_decision)
+        # check if any of the times exceeds the dump time
+        if self.time_naive > (self.dump_time * self.dump_number_naive):
+            print(f'dump naive #{self.dump_number_naive}. # of reads {len(list(self.cache_naive.keys()))}')
+            # generate filename and write to file
+            filename = f'{self.fa_out}_{self.dump_number_naive}_naive.fa'
+            write_seqdict(filename, self.cache_naive)
+            # increment the dump counter
+            self.dump_number_naive += 1
+            # reset the cache
+            self.cache_naive = dict()
 
-
+        if self.time_aeons > (self.dump_time * self.dump_number_aeons):
+            print(f'dump aeons #{self.dump_number_aeons}. # of reads {len(list(self.cache_aeons.keys()))}')
+            # generate filename and write to file
+            filename = f'{self.fa_out}_{self.dump_number_aeons}_aeons.fa'
+            write_seqdict(filename, self.cache_aeons)
+            # increment the dump counter
+            self.dump_number_aeons += 1
+            # reset the cache
+            self.cache_aeons = dict()
 
 
 
@@ -1620,15 +1719,187 @@ class UniversalHashing:
         self.p = p
 
     def draw(self):
-        a = randint(1, self.p - 1)  # TODO tmp
-        b = randint(0, self.p - 1)
-        # a = 10
-        # b = 20
+        # a = randint(1, self.p - 1)  # TODO tmp
+        # b = randint(0, self.p - 1)
+        a = 10
+        b = 20
         return lambda x: ((a * x + b) % self.p) % self.N
 
 
 
 ############################
+
+
+def replace(a1, ind, x):
+    a2 = np.copy(a1)
+    a2.put(ind,x)
+    return(a2)
+
+
+def unq(a):
+    unique_vals, counts = np.unique(a.round(decimals=5), return_counts=True)
+    return unique_vals, counts
+
+
+
+def approx_ccl(ccl, eta=11):
+    approx_ccl = np.zeros(eta, dtype='int32')
+
+    i = 0
+    for part in range(eta - 1):
+        prob = 1 - (part + 0.5) / (eta - 1)
+        while ccl[i] > prob:
+            i += 1
+        approx_ccl[part] = i
+    # approx_ccl[0] gives the length that reads reach with probability 1
+    # approx_ccl[1] length that reads reach with prob 0.9
+    # etc..
+
+    partition_lengths = np.diff(np.concatenate((np.zeros(1), approx_ccl)))[:-1]
+
+    return partition_lengths
+
+
+
+def prepare_partitions(ccl, mu, eta=11):
+    # TODO could do with some clean-up
+    # ccl = self.dbg.rld.ccl
+    # get the lengths of the piecewise constant approximation
+    partition_lengths = approx_ccl(ccl, eta)
+    # the probabilities of the approximate intervals
+    probs = np.linspace(0.9, 0.1, eta - 2)
+
+    # make sure the first partition is the longest
+    partition_lengths_sort = np.argsort(partition_lengths)[::-1]
+    longest_part_index = partition_lengths_sort[0]
+    longest_part = partition_lengths[longest_part_index]
+    assert longest_part_index == 0
+
+    # try to reduce the number of matrix multiplications even more
+    # by splitting up the first partition until
+    # it is not longer than the second biggest anymore
+    # or longer than mu if that's shorter than the second partition
+    second_longest = partition_lengths[partition_lengths_sort[1]]
+    if longest_part < 100:
+        reduction = 1
+        maxsteps = np.ceil(longest_part / reduction)
+        # maxsteps = np.floor(longest_part / reduction) # TODO tmp
+    else:
+        reduction = int(np.floor(longest_part / second_longest) - 1)
+        # the new maximum amount of matrix mult we need
+        maxsteps = np.ceil(longest_part / reduction)
+        # if the reduction is too much, revert it so that the maxsteps is at least 100
+        while maxsteps < 100 and reduction > 2:
+            reduction -= 1
+            maxsteps = np.ceil(longest_part / reduction)
+
+    assert longest_part / reduction > second_longest
+
+
+    # check that the longest part is still larger than mu
+    if maxsteps < mu:
+        reduction = np.floor(longest_part / mu) + 1
+        maxsteps = np.ceil(longest_part / reduction)
+        assert longest_part / reduction > second_longest
+        assert longest_part / reduction > mu
+
+    # adapt the partition lengths with the reduction factor
+    if reduction == 1:
+        part_len = partition_lengths
+    else:
+        # prepend the partition size of the reduced first partition (maxsteps)
+        part_len = np.concatenate((np.full(shape=reduction, fill_value=maxsteps), partition_lengths[1:]))
+
+    # prepend 1s to the probabilities for the chopped up first partition
+    probs = np.concatenate((np.ones(reduction), probs))
+
+    print(f"using reduction {reduction}")
+    print(f"part lengths {part_len}")
+
+    return part_len, probs
+
+
+
+def better_hops(score_cache, hp_cache, nnodes):
+    # init container for the benefit of each node
+    acc = np.zeros(nnodes)
+    # dummy targets of the first layer: just a range
+    targets = np.arange(nnodes)
+    scores0 = np.bincount(targets, np.squeeze(score_cache[0][targets]))
+    acc += scores0
+
+    # for the second layer, grab the indices of the nonzero elements
+    target_tuples = np.swapaxes(np.array(hp_cache[0].nonzero()), 0, 1)
+    targets = target_tuples[:, 1]
+    targets_origin = target_tuples[:, 0]
+    # the probabilities of the targets are just the data in the matrix
+    targetprobs = hp_cache[0].data
+    scores1 = np.bincount(targets_origin, np.squeeze(score_cache[1][targets] * targetprobs[:, None]))
+    acc += scores1
+    # plt.plot(acc, '.')
+    # plt.show()
+
+    # initialise all the necessary caches to save the targets,
+    # their probabilities and their origin mappings of each layer
+    mapping_cache = [0] * len(score_cache)
+    mapping_cache[0] = targets_origin
+    expand_cache = [0] * len(score_cache)
+    expand_cache[0] = targets
+    tp_cache = [0] * len(score_cache)
+    tp_cache[0] = targetprobs
+
+    # i = 1
+    for i in range(1, len(score_cache) - 1):
+        # use the previous targets to get the new targets
+        new_targets = hp_cache[i][targets].nonzero()
+        nt_flat = new_targets[1]
+        expand_cache[i] = nt_flat
+
+        # create a mapping between the previous targets and the new ones
+        _, target_multiplicity = np.unique(new_targets[0], return_counts=True)
+        mapping = np.repeat(np.arange(len(targets)), target_multiplicity)
+        mapping_cache[i] = mapping
+
+        # grab the probabilities of the splits between previous and next targets
+        target_probs = hp_cache[i][targets].data
+        tp_cache[i] = target_probs
+
+        # new targets become the previous targets for next iteration (layer)
+        # print(targets.shape)
+        targets = nt_flat
+
+        # use the new targets to grab the scores, multiply with probs and map to origins
+        scores = np.squeeze(score_cache[i + 1][nt_flat])
+        scores = scores * target_probs
+        scores_red = np.bincount(mapping, scores)
+        # print(np.unique(scores_red, return_counts=True))
+
+        # now map this layer all the way back to the initial origin nodes
+        for j in list(reversed(range(i))):
+            lower_mapping = mapping_cache[j]
+            lower_tp = tp_cache[j]
+            scores_red = scores_red * lower_tp
+            scores_red = np.bincount(lower_mapping, scores_red)
+
+        acc += scores_red
+
+        # debugging code for visualisations
+        # print(unq(acc))
+        # plt.plot(acc, '.')
+        # plt.show()
+        # i += 1
+        # utility = np.squeeze(acc)
+        # # utility += self.dbg.edge_scores
+        # culdesac_edges = np.all(np.isin(edge_mapping[:, 1:], culdesac), axis=1)
+        # em_notri = edge_mapping[~culdesac_edges, :]
+        # self.benefit_raw[em_notri[:, 1], em_notri[:, 2]] = utility[~culdesac_edges]
+        # self.benefit_raw.eliminate_zeros()
+        # self.gt_format(mat=self.benefit_raw)
+        # plot_benefit(graph=self.gtg, name="benefit_raw", esize=50)
+
+    return acc
+
+
 
 
 def parse_stdout(out):
@@ -1663,19 +1934,35 @@ def parse_stdout(out):
     return n_bases, n_reads, n_mapped, n_unmapped
 
 
-def quick_gaf(gaf):
-    # just for quick reading of params
+def diagnose_mappings(gaf):
+    # loop over gaf entries with generator function
     gaf_file = open(gaf, 'r')
-    # keep track of which edge counts to increment in the graph
+
     for record in parse_gaf(gaf_file):
-        print(f'{record["qname"]}  '
-              f'{record["qlen"]}  '
-              f'{record["n_matches"]}  '
-              f'{record["alignment_block_length"]}  '
-              f'{record["idt"]}  ')
+        # record = list(parse_gaf(gaf_file))[4]
+
+        # extract the transitions
+        if record['path'].startswith('>'):
+            transitions = [_conv_type(x, int) for x in record['path'].split('>') if x != '']
+        elif record['path'].startswith('<'):
+            # include a reverse
+            transitions = [_conv_type(x, int) for x in record['path'].split('<') if x != '']
+            transitions.reverse()
+        else:
+            continue
+
+
+        aln = record['alignment_block_length']
+        rid = record['qname']
+        qlen = record['qlen']
+        idt = record["idt"]
+        trans_len = len(transitions)
+        unq, cnt = np.unique(np.array(transitions), return_counts=True)
+
+        print(f'{rid}  {qlen}  {aln}  {idt}  {trans_len}  {cnt}')
 
     gaf_file.close()
-
+    return
 
 
 
@@ -1692,7 +1979,7 @@ def memsize(m):
     print(f"{mem / 1e6} Mb")
 
 
-def is_symm(a, rtol=1e-05, atol=1e-08):
+def is_symm(a, rtol=1e-05, atol=1e-05):
     return np.allclose(a, a.T, rtol=rtol, atol=atol)
 
 
@@ -1790,8 +2077,8 @@ def filter_unmapped_reads(reads, processed_reads, partial_mappers):
         else:
             reads_filt[read_id] = seq
 
-    print(f'decomposing {len(reads_filt)} reads')
-    print(f'also {len(partial_mappers)} partially mapped reads')
+    print(f'decomposing: {len(reads_filt)}')
+    print(f'partial mappers: {len(partial_mappers)}')
 
     # then loop over the partial mappers and add the sequence chunks that was not mapped
     for read_id, (start, stop) in partial_mappers.items():
@@ -1847,7 +2134,7 @@ def decompose_into_kmers(reads, k):
 
 
 
-def init_s_array(prior=0.001, paths=16, maxcount=10):
+def init_s_array(prior, paths=16, maxcount=10):
     # up to which count the array should be filled
     crange = np.arange(maxcount)
 
@@ -1901,6 +2188,8 @@ def node_score(counts, prior):
     return score
 
 
+def nonzero_indices(sparse):
+    return np.where(np.diff(sparse.indptr) != 0)[0]
 
 
 
@@ -1920,197 +2209,6 @@ def allequal(a, b):
     r = np.allclose(content_a, content_b)
     print(r)
 
-
-
-
-
-
-
-def plot_gt(graph, vcolor=None, ecolor=None, hcolor=None, comp=None):
-    # initialise figure to plot on to
-    _, ax = plt.subplots()
-
-    # transform edge weights to float for plotting
-    if ecolor is not None:
-        ecolor = ecolor.copy(value_type="float")
-
-    vcol = vcolor if vcolor is not None else "grey"
-    hcol = hcolor if hcolor is not None else [0, 0, 0, 0, 0]
-    ecol = ecolor if ecolor is not None else ""
-
-    # overwrite vcol with components if set
-    if comp is not None:
-        comp_label, _ = label_components(graph, directed=False)  # can be used for vertex_fill_color
-        # print(set(comp_label))
-        vcol = comp_label
-        print(len(set(comp_label)))
-
-    # if color is not None:
-    #     obj_col.a = color
-    # else:
-    #     obj_col = "grey"
-
-    a = graph_draw(graph, mplfig=ax,
-                   #vertex_fill_color="grey",# vcmap=cm.coolwarm,        # vertex fill is used to show score/util
-                   vertex_halo=True, vertex_halo_color=hcol,
-                   vertex_text=vcol,                         # just indices
-                   edge_text=ecol, edge_text_distance=0,                   # show edge weights as text
-                   # edge_text=graph.edge_index, edge_text_distance=0,     # edge indices
-                   #edge_color=ecol,#, vertex_size=2)#, ecmap=cm.coolwarm,                  # color edge weights
-                   output_size=(3000, 3000), vertex_size=1)
-    # return a
-    plt.show(block=True)
-
-
-
-def create_layout(graph):
-    pos = gt.draw.sfdp_layout(graph, multilevel=True, coarse_method="hybrid", max_iter=100)
-    return pos
-
-
-def plot_i(graph):
-    ind = graph.vp.ind.copy(value_type="float")
-    pos = create_layout(graph)
-    graph_draw(graph, pos=pos,
-               vertex_fill_color=ind,
-               vcmap=cm.coolwarm,
-               vertex_text=ind,
-               output="test.pdf",
-               output_size=(3000,3000))
-
-
-def plot_s(graph):
-    scores = graph.vp.scores.copy(value_type="float")
-    pos = create_layout(graph)
-    graph_draw(graph, pos=pos,
-               vertex_fill_color=scores,
-               vcmap=cm.coolwarm,
-               vertex_text=graph.vp.npaths,
-               output="test.pdf",
-               output_size=(3000,3000))
-
-
-def plot_w(graph):
-    # can be used for benefit and strat
-    w = graph.ep.weights.copy(value_type="float")
-    pos = create_layout(graph)
-    graph_draw(graph, pos=pos,
-               edge_color=w,
-               ecmap=cm.coolwarm,
-               edge_pen_width=5,
-               vertex_fill_color="white",
-               vertex_size=8,
-               vertex_color="white",
-               vertex_shape="circle",
-               output="test.pdf",
-               output_size=(3000,3000))
-
-
-
-def subset_graph(graph, mat, start, steps):
-    # to subset a graph for visualisation we perform a walk starting at some node
-    # the walk returns an edge mask and the set of visited nodes
-    edge_prop, visited_nodes = walk_graph(mat=mat, start=start, steps=steps)
-    # use the edge mask and the visited nodes to create a filtered version of the graph
-    graph_filt = apply_mask(graph=graph, mask=edge_prop, visited_nodes=visited_nodes)
-    return graph_filt
-
-
-def walk_graph(mat, start, steps):
-    # to create a visualisation of a subpart of a graph, we conduct a walk
-    # all visited edges will be preserved, all others eliminated
-    # create a copy of the input sparse matrix
-    mask = mat.copy()
-    mask.data.fill(0)
-
-    # breadth-first search that keeps track of visited nodes and traversed edges
-    visited_nodes, visited_edges = bfs(graph=mat, node=start, maxsteps=steps, track_edges=True)
-
-    # set the visited edges to True for filtering
-    indices = np.array(list(visited_edges))
-    mask[indices[:, 0], indices[:, 1]] = 1
-
-    # iterate over the matrix to create a 1d filter
-    cx = mask.tocoo()
-    edge_prop = []
-    for i, j, v in zip(cx.row, cx.col, cx.data):
-        edge_prop.append(v)
-
-    return np.array(edge_prop), visited_nodes
-
-
-def apply_mask(graph, mask, visited_nodes):
-    # create an edge prop from the mask
-    emask = graph.new_edge_property("bool")
-    emask.a = mask
-
-    # create a vertex prop from the visited nodes
-    # .vp.ind is created when the graph is initialised from the hashed kmer indices
-    vertex_indices = list(graph.vp.ind)
-    # transform to integers
-    vertex_int = np.array([int(i) for i in vertex_indices])
-    vertex_walked = np.isin(vertex_int, list(visited_nodes))
-    vmask = graph.new_vertex_property("bool")
-    vmask.a = vertex_walked
-    # finally apply the masks for edges and vertices
-    graph_filt = gt.GraphView(graph, efilt=emask, vfilt=vmask)
-    return graph_filt
-
-
-def bfs(graph, node, maxsteps, track_edges=None):
-    # graph is a sparse adjacency matrix
-    visited = set()
-    visited_edges = set()
-    queue = []
-    steps = 0
-    # add the starting node and put it in the queue
-    visited.add(node)
-    queue.append(node)
-    # iterate until either the queue is empty
-    # or the maximum steps have been taken
-    while steps < maxsteps and len(queue) > 0:
-        s = queue.pop(0)
-        # get the neighbors of the current node
-        for neighbour in graph[s, :].nonzero()[1]:
-            if neighbour not in visited:
-                visited.add(neighbour)
-                queue.append(neighbour)
-                if track_edges:
-                    visited_edges.add((s, neighbour))
-                steps += 1
-    return visited, visited_edges
-
-
-def plot_complex(dbg, steps):
-    # find the complex nodes in the graph,
-    # take one of them and filter the graph
-    # then visualise
-    paths = dbg.n_paths
-    complex_nodes = np.where(paths.data == np.max(paths.data))
-    pc = paths.tocoo()
-    complex_indices = pc.row[complex_nodes]
-
-    g_filt = subset_graph(graph=dbg.gtg, mat=dbg.adjacency, start=complex_indices[0], steps=steps)
-
-    plot_w(g_filt)
-
-
-
-
-# def plot_u(graph, direc):
-#     # separate function to plot the edge-centric benefit
-#     ecol = graph.ep.util_zig if direc == 0 else graph.ep.util_zag
-#     e_weights = graph.ep.edge_weights.copy(value_type="float")
-#
-#     _, ax = plt.subplots()
-#     a = graph_draw(graph, mplfig=ax,
-#                    edge_color=ecol, ecmap=cm.coolwarm, edge_pen_width=1.5,
-#                    vertex_fill_color="grey", vertex_size=0.1,
-#                    edge_text=e_weights, edge_text_distance=1, edge_font_size=2)  #,
-#                    # output_size=(3000, 3000),
-#                    # vertex_text=graph.vertex_index)  # just indices
-#                    # edge_text=graph.edge_index, edge_text_distance=0,     # edge indices
-#     plt.show(block=a)
 
 
 
@@ -2224,7 +2322,7 @@ def probability_hashimoto(hashimoto, edge_mapping, adj):
 
     hashimoto_weighted = csr_matrix(hashimoto.multiply(weights))
     # normalise to turn into probabilities
-    row_norm(hashimoto_weighted)
+    row_norm.row_norm(hashimoto_weighted)
     # filter very low probabilities, e.g. edges escaping absorbers
     hashimoto_prob = filter_low_prob(prob_mat=hashimoto_weighted)
     return hashimoto_prob
@@ -2240,7 +2338,8 @@ def filter_low_prob(prob_mat, threshold=0.001):
     # unset the 0 elements
     prob_mat.eliminate_zeros()
     # normalise the matrix again by the rowsums
-    row_norm(prob_mat)
+    row_norm.row_norm(prob_mat)
+    # prob_mat.eliminate_zeros()
     return prob_mat
 
 
@@ -2268,12 +2367,13 @@ def parse_gaf(gaf):
         record = record.strip().split("\t")
         record_dict = {fields[x]: _conv_type(record[x], int) for x in range(12)}
 
-        # get the cigar
-        # cigar = record[15].split(':')[-1]
-        # record_dict['cigar'] = cigar
+        tag_dict = dict()
+        tags = {record[x] for x in range(13, len(record))}
+        for tag in tags:
+            tag = tag.strip().split(":")
+            tag_dict[tag[0]] = tag[-1]
 
-        identity = record[14].split(':')[-1]
-        record_dict['idt'] = float(identity)
+        record_dict['idt'] = float(tag_dict['id'])
 
         yield record_dict
 
@@ -2304,7 +2404,26 @@ def _conv_type(s, func):
         return s
 
 
+def is_binary(file, length=1024):
+    # open the file in binary mode to read a little bit at the beginning
+    chunk = []
+    try:
+        with open(file, 'rb') as f:
+            chunk = f.read(length)
+    except IOError as e:
+        print(e)
 
+    if not chunk:
+        print("file not found")
+        return
+
+    # then try to decode it to utf-8
+    # if that fails, the file is not a text file
+    try:
+        chunk.decode(encoding="utf-8")
+        return False
+    except UnicodeDecodeError:
+        return True
 
 
 
