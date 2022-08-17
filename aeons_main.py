@@ -22,3 +22,5 @@ self = ar
 
 while ar.batch <= args.maxb:
     ar.process_batch()
+
+ar.cleanup()

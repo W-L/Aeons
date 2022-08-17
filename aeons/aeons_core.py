@@ -1442,6 +1442,14 @@ class AeonsRun:
         return reads_decision
 
 
+    def cleanup(self):
+        # after the run, move temporary files into the run dir
+        tmpdir = f'{self.args.out_dir}/tmp'
+        if not os.path.exists(tmpdir):
+            os.mkdir(tmpdir)
+        execute(f'mv {self.name}.* {tmpdir}')
+
+
     # @profile
     def process_batch(self):
         logging.info(f'\n NEW BATCH #############################  {self.batch}')
