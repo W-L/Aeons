@@ -27,6 +27,8 @@ class LinearMapper:
 
 
     def map_sequences(self, sequences):
+        # sequences is a dict
+        # output is a dict with PafLine objects
         # before ingesting reads, check for overlaps and containment
         # also used to check if any reads from the readpool are contained
         paf_raw = self.mappy_batch(sequences=sequences, truncate=False)
@@ -109,4 +111,60 @@ class LinearMapper:
             # if hit.is_primary:
             results.append(f"{read_id}\t{len(seq)}\t{hit}")
         return results
+
+
+class ValidationMapping:
+
+    def __init__(self, mapper, merged_seq, seqpool):
+        # merged_seq is newly merged sequence that we want to validate - Sequence()
+        self.merged_seq = merged_seq
+        # persistent linear mapper - created in AeonsRun
+        self.mapper = mapper
+        # we need the seqpool to grab the component sequences
+        self.seqpool = seqpool
+        # grab component sequences
+        component_sequences = self.grab_components(self.merged_seq)
+        # map the component seqs
+        self.component_paf_dict = self.map_components_to_reference(component_sequences)
+        self.component_plot = self.plot_components(self.component_paf_dict, "comp")
+        # map the components onto the new merged sequence
+        self.merger_paf_dict = self.map_components_to_merged(component_sequences)
+        self.merger_plot = self.plot_components(self.merger_paf_dict, "merge")
+
+
+    def grab_components(self, merged_seq):
+        # grab the ids of components
+        merger_component_ids = merged_seq.components
+        logging.info(f'{len(merger_component_ids)} components in this merger')
+        # grab the sequences
+        component_sequences = dict()
+        for comp_id in merger_component_ids:
+            try:
+                comp_seqo = self.seqpool.sequences[comp_id]
+            except KeyError:
+                logging.info("component sequence should have been found")
+                continue
+            component_sequences[comp_id] = comp_seqo.seq
+        return component_sequences
+
+    def map_components_to_reference(self, component_sequences):
+        # map the components of the merged sequences to the reference
+        comp_paf_dict = self.mapper.map_sequences(sequences=component_sequences)
+        return comp_paf_dict
+
+    def map_components_to_merged(self, component_sequences):
+        # map components to their newly formed merged sequence
+        # make fasta from merged sequence
+        merged_fasta = f'>{self.merged_seq.header}\n{self.merged_seq.seq}'
+        with open("tmp.fa", "w") as merged_fasta_file:
+            merged_fasta_file.write(merged_fasta)
+        merge_mapper = LinearMapper(ref="tmp.fa")
+        merger_paf_dict = merge_mapper.map_sequences(sequences=component_sequences)
+        return merger_paf_dict
+
+
+    def plot_components(self, paf_dict, out):
+        # use generic paf_dict plotting method from aeons_paf
+        component_plot = Paf.plot_pafdict(paf_dict, out)
+        return component_plot
 

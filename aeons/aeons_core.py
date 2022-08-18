@@ -6,7 +6,7 @@ from .aeons_readlengthdist import ReadlengthDist
 from .aeons_polisher import Polisher
 from .aeons_merge import ArrayMerger
 from .aeons_paf import Paf, PafLine
-from .aeons_mapper import LinearMapper
+from .aeons_mapper import LinearMapper, ValidationMapping
 from .aeons_kmer import euclidean_dist, euclidean_threshold
 
 # STANDARD LIBRARY
@@ -830,6 +830,12 @@ class AeonsRun:
         self.rl_dist = ReadlengthDist(mu=args.mu)
 
 
+        # load a mapper for some reference
+        # used to validate mergers in testing
+        if args.ref:
+            self.reference_mapper = LinearMapper(ref=args.ref)
+
+
         # load some initial batches
         if not args.preload:
             self.load_init_batches(binit=self.args.binit)
@@ -1285,6 +1291,9 @@ class AeonsRun:
                                 merged_components=merged_components, merged_atoms=merged_atoms)
             new_sequences[header] = new_seqo
 
+            # hook for validation mapping - this is for testing
+            # vm = ValidationMapping(mapper=self.reference_mapper, merged_seq=new_seqo, seqpool=self.pool)
+
         self.remove_seqs(sequences=used_rids)
         new_pool = SequencePool(sequences=new_sequences, min_len=self.args.min_len)
         return new_pool
@@ -1364,7 +1373,9 @@ class AeonsRun:
         contigs = self.pool.declare_contigs(min_len=self.args.contig_lim)
         pool_paf = self.pool.run_ava(sequences=contigs.seqdict(), fa=self.pool.fa, paf=self.pool.ava)
         pool_contained, _, _ = self.ava.load_ava(paf=pool_paf)
-        self.remove_seqs(sequences=pool_contained.keys())
+        contained_ids = pool_contained.keys()
+        logging.info(f'removing {len(contained_ids)} contained sequences from pool')
+        self.remove_seqs(sequences=contained_ids)
 
 
     def trim_sequences(self):
@@ -1378,6 +1389,7 @@ class AeonsRun:
         trim_dict = self.ava.to_be_trimmed()
         # trim_dict = dict()
         logging.info(f"trimming {len(trim_dict.keys())} seqs")
+        # trim and ingest
         trimmed_seqs = self.pool.trim_sequences(trim_dict=trim_dict)
         trim_paf = self.pool.run_ava(sequences=trimmed_seqs,
                                      fa=f'{self.pool.fa}.trim',
@@ -1495,6 +1507,7 @@ class AeonsRun:
         node_sources, node_positions = self.pool.contigs2gfa(gfa=self.pool.gfa, contigs=contigs, node_size=self.args.node_size)
         # wrapper for graph processing to get new strategy
         self.graph = SparseGraph(args=self.args, approx_ccl=self.rl_dist.approx_ccl, node_sources=node_sources, node_positions=node_positions)
+        # find new strategy
         self.strat = self.graph.process_graph(gfa=self.pool.gfa)
 
         # self.strat_csv(self.strat, node2pos)  # this is for bandage viz

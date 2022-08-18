@@ -437,6 +437,73 @@ class Paf:
         return paf_dict
 
 
+    @staticmethod
+    def plot_pafdict(paf_dict, out):
+        import plotnine as p9
+        import pandas as pd
+        # grab all mappings in the paf dict
+        paflines = list(paf_dict.values())
+        # first check that all of them are on the same target
+        targets = [p[0].tname for p in paflines]
+        if len(np.unique((targets))) != 1:
+            print("more than one target!")
+            return
+
+        # target range - extent of plotting the reference
+        target_min = np.min([p[0].tstart for p in paflines])
+        target_max = np.max([p[0].tend for p in paflines])
+        # empty dict to hold the posititions
+        frag_lines = {"start": [], "end": [], "ymin": [], "ymax": [], "c": [], "lab": []}
+        # this is for the target
+        frag_lines['start'].append(target_min)
+        frag_lines['end'].append(target_max)
+        frag_lines['ymin'].append(-0.5)
+        frag_lines['ymax'].append(0.5)
+        frag_lines['c'].append(0)
+        frag_lines['lab'].append(targets[0])
+        # add two rectangles for each mapping
+        # one of them for the mapped are
+        # the second for the entire query
+        # (i.e. including unmapped bits on either end)
+        for p_ind in range(len(paflines)):
+            p = paflines[p_ind][0]
+            frag_lines['start'].append(p.tstart)
+            frag_lines['end'].append(p.tend)
+            frag_lines['ymin'].append(p_ind + 1)
+            frag_lines['ymax'].append(p_ind + 2)
+            frag_lines['c'].append(0)
+            frag_lines['lab'].append(p.qname)
+            # query range
+            rstart = p.tstart - p.qstart
+            rend = p.tend + (p.qlen - p.qend)
+            frag_lines['start'].append(rstart)
+            frag_lines['end'].append(rend)
+            frag_lines['ymin'].append(p_ind + 1.25)
+            frag_lines['ymax'].append(p_ind + 1.75)
+            frag_lines['c'].append(1)
+            frag_lines['lab'].append(p.qname)
+
+        # transform to dataframe
+        df = pd.DataFrame(frag_lines)
+        df['c'] = df['c'].astype("category")
+        # construct plot with rectangles
+        # fill is mapped to mapping vs query range
+        # color mapped to sequence name
+        plot = (p9.ggplot() +
+                p9.geom_rect(data=df,
+                             mapping=p9.aes(xmin="start", xmax="end", ymin="ymin", ymax="ymax",
+                                            fill="c", color="lab")) +
+                p9.scale_fill_manual(values=["grey", 'black']) +
+                p9.ylab("") +
+                p9.xlab("") +
+                p9.theme_minimal() +
+                p9.theme(axis_text_y=p9.element_blank(),
+                         axis_ticks_major_y=p9.element_blank(),
+                         legend_position="top", legend_title=p9.element_blank()))
+        plot.save(f"{out}.pdf")
+        return plot
+
+
 
 def format_records(record):
     # Helper function to make fields the right type
