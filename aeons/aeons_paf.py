@@ -322,6 +322,23 @@ class PafLine:
 
 
 
+    def get_ranges(self):
+        # extract the ranges of mappings of the query and target
+        # target range
+        # USED BY REPEAT MODULE
+        tstart = self.tstart
+        tend = self.tend
+
+        if self.rev:
+            qstart = self.qlen - self.qend
+            qend = self.qlen - self.qstart
+        else:
+            qstart = self.qstart
+            qend = self.qend
+        return qstart, qend, tstart, tend
+
+
+
     def plot(self):
         import plotnine as p9
         import pandas as pd
