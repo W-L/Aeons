@@ -931,7 +931,7 @@ class AeonsRun:
         if short_seqs:
             self.ava.remove_from_ava(sequences=short_seqs)
 
-        # single links
+        # single links  # TODO uncomment
         self.ava.single_links(seqpool=self.pool)
 
         # merge new sequences
@@ -1857,7 +1857,7 @@ class SequenceAVA:
                     # no overlaps on the end of this node
                     if not avas:
                         continue
-                    # grab next target
+                    # grab next target - this requires that there is only 1 overlap
                     _, rec = next(iter(avas.items()))
                     # exact overlap was already written (reciprocal)
                     if rec.line in written_lines:
@@ -1879,6 +1879,31 @@ class SequenceAVA:
             logging.info(f"stderr: \n {stderr}")
         return True
 
+
+    def ava2gt(self):
+        # indexing ava_dict returns node, dict for each end
+        edges = []
+        processed_edges = set()
+        for node, edge_dict in self.ava_dict.items():
+            for side, avas in edge_dict.items():
+                # no overlaps on the end of this node
+                if not avas:
+                    continue
+
+                for (tnode, tside), _ in avas.items():
+                    source = f'{node}-{side}'
+                    target = f'{tnode}-{tside}'
+                    edge = (source, target)
+                    edge_r = (target, source)
+                    if edge in processed_edges:
+                        continue
+                    elif edge_r in processed_edges:
+                        continue
+                    else:
+                        edges.append(edge)
+                        processed_edges.add(edge)
+                        processed_edges.add(edge_r)
+        return edges
 
 
 class Sequence:
