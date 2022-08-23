@@ -7,6 +7,7 @@ from .aeons_merge import ArrayMerger
 from .aeons_paf import Paf
 from .aeons_mapper import LinearMapper, ValidationMapping
 from .aeons_sequence import Sequence, SequencePool, SequenceAVA
+from .aeons_repeats import RepeatFilter
 
 
 # STANDARD LIBRARY
@@ -850,6 +851,13 @@ class AeonsRun:
 
         self.batch = self.stream.batch
 
+        # fill the initial AVA
+        self.prep_first_ava()
+
+        # initialise a RepeatFilter from first AVA
+        self.repeat_filter = RepeatFilter(name=args.name, ava_dict=self.ava.ava_dict, seqpool=self.pool.sequences)
+        self.remove_seqs(sequences=self.repeat_filter.affected_sids)
+
         # create first asm
         # makes contigs, saves graph, loads adj, finds comp ends
         self.create_init_asm()
@@ -930,9 +938,7 @@ class AeonsRun:
             self.pool.ingest(seqs=contig_pool)
 
 
-
-
-    def create_init_asm(self):
+    def prep_first_ava(self):
         # write out the current readpool & run complete all versus all
         logging.info("running first AVA")
         paf = self.pool.run_ava(sequences=self.pool.seqdict(), fa=self.pool.fa, paf=self.pool.ava)
@@ -948,7 +954,10 @@ class AeonsRun:
         if short_seqs:
             self.ava.remove_from_ava(sequences=short_seqs)
 
-        # single links  # TODO uncomment
+
+
+    def create_init_asm(self):
+        # single links
         self.ava.single_links(seqpool=self.pool)
 
         # merge new sequences
@@ -1496,12 +1505,10 @@ class AeonsRun:
         if self.batch % 30 == 0:
             print("breakpoint")
 
-        # TODO filter sequences with repeats at ends
-
-
-
+        # filter sequences with repeats at the end
+        reads_filtered = self.repeat_filter.filter_batch(seq_dict=reads_decision)
         # load new sequences, incl length filter
-        sequences = SequencePool(sequences=reads_decision, min_len=self.args.min_len)
+        sequences = SequencePool(sequences=reads_filtered, min_len=self.args.min_len)
         # add new sequences to AVA
         self.add_new_sequences(sequences=sequences)
         # check for overlaps and containment in pool
