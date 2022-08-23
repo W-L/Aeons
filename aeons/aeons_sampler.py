@@ -235,7 +235,7 @@ class FastqStream_mmap:
 
 
 
-    def _get_batch(self):
+    def _get_batch(self, delete=True):
         """
         return a batch of reads from the fastq file
         """
@@ -291,10 +291,10 @@ class FastqStream_mmap:
         if not batch.startswith('@'):
             logging.info("The batch is broken")
 
-
-        # remove the row from the offsets so it does not get sampled again
-        new_offsets = np.delete(self.offsets, 0, 0)
-        self.offsets = new_offsets
+        if delete:
+            # remove the row from the offsets so it does not get sampled again
+            new_offsets = np.delete(self.offsets, 0, 0)
+            self.offsets = new_offsets
         # parse the batch, which is just a long string into dicts
         read_lengths, read_sequences, basesTOTAL = FastqStream.parse_batch(batch_string=batch)
         return read_lengths, read_sequences, basesTOTAL
@@ -314,3 +314,9 @@ class FastqStream_mmap:
         return chunk
 
 
+    def prefetch(self):
+        # this is to look into a batch without actually using it
+        # this way we can have a first idea about the read length dist
+        # in simulation runs before using any data
+        read_lengths, _, _ = self._get_batch(delete=False)
+        return read_lengths

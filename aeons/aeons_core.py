@@ -838,7 +838,13 @@ class AeonsRun:
 
         # load some initial batches
         if not args.preload:
-            self.load_init_batches(binit=self.args.binit)
+            if self.args.binit:
+                self.load_init_batches(binit=self.args.binit)
+            # if binit is set to 0, we calculate how many batches it takes to cover the genome x times
+            else:
+                binit = self.wait_for_batches(bsize=self.args.bsize)
+                logging.info(f"loading {binit} batches...")
+                self.load_init_batches(binit=binit)
         else:
             self.load_init_contigs(preload=self.args.preload, trusted=self.args.hybrid)
 
@@ -873,6 +879,17 @@ class AeonsRun:
         # add the new files to the set of processed files
         self.processed_files.update(new_fq)
         return list(new_fq)
+
+
+
+    def wait_for_batches(self, bsize, gsize=12e6, cov=3):
+        # how many batches of reads do we need to wait for until the estimated genome size is
+        # covered ~cov times?
+        read_lengths = self.stream.prefetch()
+        self.rl_dist.update(read_lengths=read_lengths, recalc=True)
+        mean_rld = self.rl_dist.lam
+        x = (cov * gsize) / bsize / mean_rld
+        return int(np.ceil(x))
 
 
     def load_init_batches(self, binit):
