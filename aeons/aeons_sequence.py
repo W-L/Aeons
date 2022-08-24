@@ -205,8 +205,8 @@ class SequenceAVA:
                     # after filtering choose the link we retain
                     # using some characteristic, i.e. largest resulting sequence
                     # other options: alignment_block_length ..
-                    # metric = [rec.qlen + rec.tlen for rec in avas.values()]
-                    metric = [rec.alignment_block_length for rec in avas.values()]
+                    metric = [rec.qlen + rec.tlen for rec in avas.values()]
+                    # metric = [rec.alignment_block_length for rec in avas.values()]
                     targets = list(avas.keys())
                     max_idx = np.argmax(metric)
                     chosen_t, chosen_t_side = targets[max_idx]
