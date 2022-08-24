@@ -44,6 +44,7 @@ import matplotlib.pyplot as plt
 # plt.switch_backend("Qt5cairo")
 import line_profiler
 # import memory_profiler
+# import gt_plot
 
 
 
@@ -59,6 +60,7 @@ class Constants:
         self.wait = 60                  # waiting time in live version
         self.min_len = 1000
         self.contig_lim = 30000         # what to consider as contigs, when writing for mapping against
+        self.cov_wait = 2
 
 
         # TODO tmp
@@ -843,7 +845,7 @@ class AeonsRun:
                 self.load_init_batches(binit=self.args.binit)
             # if binit is set to 0, we calculate how many batches it takes to cover the genome x times
             else:
-                binit = self.wait_for_batches(bsize=self.args.bsize)
+                binit = self.wait_for_batches(bsize=self.args.bsize, cov=self.args.cov_wait)
                 logging.info(f"loading {binit} batches...")
                 self.load_init_batches(binit=binit)
         else:
@@ -890,7 +892,7 @@ class AeonsRun:
 
 
 
-    def wait_for_batches(self, bsize, gsize=12e6, cov=3):
+    def wait_for_batches(self, bsize, gsize=12e6, cov=2):
         # how many batches of reads do we need to wait for until the estimated genome size is
         # covered ~cov times?
         read_lengths = self.stream.prefetch()
