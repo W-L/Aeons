@@ -170,7 +170,7 @@ class PafLine:
             if self.qstart > (self.tlen - self.tend):
                 # A overlaps B
                 # a + b -
-                return 4, 'R', 'R'
+                return 4, 'L', 'R'    # TODO this used to be R R, but I think was wrong
             else:
                 # B overlaps A
                 # b + a -
@@ -178,7 +178,7 @@ class PafLine:
         elif (self.qlen - self.qstart) > self.tend:
             # A overlaps B
             # a - b +
-            return 4, 'L', 'L'
+            return 4, 'R', 'L'   # TODO used to be L L, but I think was wrong
         else:
             # B overlaps A
             # b - a +
@@ -320,22 +320,6 @@ class PafLine:
 
         return sid, trim_start, trim_stop, other
 
-
-
-    def get_ranges(self):
-        # extract the ranges of mappings of the query and target
-        # target range
-        # USED BY REPEAT MODULE
-        tstart = self.tstart
-        tend = self.tend
-
-        if self.rev:
-            qstart = self.qlen - self.qend
-            qend = self.qlen - self.qstart
-        else:
-            qstart = self.qstart
-            qend = self.qend
-        return qstart, qend, tstart, tend
 
 
 
