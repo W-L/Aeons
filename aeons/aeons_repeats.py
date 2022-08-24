@@ -109,13 +109,11 @@ class RepeatFilter:
 
                     # ATTENTION node is not always the query!
                     if rec.qname == node:
+                        start = rec.qstart
+                        end = rec.qend
                         if rec.rev:
-                            start = rec.qlen - rec.qend
-                            end = rec.qlen - rec.qstart
                             strand = 1
                         else:
-                            start = rec.qstart
-                            end = rec.qend
                             strand = 0
                     elif rec.tname == node:
                         start = rec.tstart
