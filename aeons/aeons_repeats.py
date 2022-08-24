@@ -4,6 +4,7 @@ import numpy as np
 from collections import defaultdict
 
 from .aeons_mapper import LinearMapper
+from .aeons_utils import ascii_hist_values
 
 
 class Repeat:
@@ -15,6 +16,8 @@ class Repeat:
         self.ends = []
         self.start = 0
         self.end = 0
+        self.degree = 0
+        self.strands = []
 
 
     def calc_ranges(self):
@@ -36,6 +39,8 @@ class Repeat:
         # then extract the sequence
         seq = self.get_sequence(seqpool)
         self.length = len(seq)
+        if not self.length:
+            return ""
         # construct fasta entry
         header = f'{self.rid}-{self.side}-{self.start}:{self.end}'
         fa = f'>{header}\n{seq}\n'
@@ -52,8 +57,9 @@ class RepeatFilter:
     """
     def __init__(self, name, ava_dict, seqpool):
         self.library = f'{name}.repeat_lib.fa'
+        lim = self.repeat_degree_limit(ava_dict)
         # collect repeat overlaps in the given ava_dict
-        repeats = self.collect_repeats(ava_dict)
+        repeats = self.collect_repeats(ava_dict, lim=lim)
         # write out the fasta file
         self.write_library(repeats, seqpool)
         # initialise a LinearMapper object
@@ -62,6 +68,27 @@ class RepeatFilter:
         self.affected_sids = self.filter_construction_seqs(repeats)
 
 
+    def repeat_degree_limit(self, ava_dict):
+        # check the degree of all nodes in the graph
+        degree = self.node_degree(ava_dict)
+        # make little histogram plot
+        logging.info("degree distribution of initial graph")
+        print(ascii_hist_values(degree))
+        # detect limit
+        lim = np.quantile(degree, 0.95)
+        logging.info(f"detecting repeats at degree >{lim}")
+        return lim
+
+
+    def node_degree(self, ava_dict):
+        # automatic way of finding the degree to declare repeats
+        degree = []
+        # indexing ava_dict returns node, dict for each end
+        for node, edge_dict in ava_dict.items():
+            for side, avas in edge_dict.items():
+                degree.append(len(avas))
+        return degree
+
 
     def collect_repeats(self, ava_dict, lim=4):
         n_edges = []
@@ -69,24 +96,42 @@ class RepeatFilter:
         # indexing ava_dict returns node, dict for each end
         for node, edge_dict in ava_dict.items():
             for side, avas in edge_dict.items():
-                # only nodes with more than 3 edges are considered
+                # only nodes with more than lim edges are considered
                 n = len(avas)
                 n_edges.append(n)
                 if n < lim:
                     continue
                 # loop through edges from the query end
-                for (tnode, tside), pafline in avas.items():
-                    # grab the repeats at the query and target sides
-                    qr = repeats[f'{node}-{side}']
-                    tr = repeats[f'{tnode}-{tside}']
-                    qr.rid, qr.side = node, side
-                    tr.rid, tr.side = tnode, tside
-                    # extract the ranges of this overlap
-                    qstart, qend, tstart, tend = pafline.get_ranges()
-                    qr.starts.append(qstart)
-                    qr.ends.append(qend)
-                    tr.starts.append(tstart)
-                    tr.ends.append(tend)
+                for rec in avas.values():
+                    # grab the repeats
+                    repo = repeats[f'{node}-{side}']
+                    repo.rid, repo.side = node, side
+
+                    # ATTENTION node is not always the query!
+                    if rec.qname == node:
+                        if rec.rev:
+                            start = rec.qlen - rec.qend
+                            end = rec.qlen - rec.qstart
+                            strand = 1
+                        else:
+                            start = rec.qstart
+                            end = rec.qend
+                            strand = 0
+                    elif rec.tname == node:
+                        start = rec.tstart
+                        end = rec.tend
+                        strand = 0
+                    else:
+                        # should never be the case
+                        print("node name not in paf record")
+                        continue
+
+                    # apply repo attr
+                    repo.starts.append(start)
+                    repo.ends.append(end)
+                    repo.strands.append(strand)
+                    repo.degree = n
+
         return repeats
 
 
@@ -163,3 +208,7 @@ class RepeatFilter:
         # TODO maybe implement an aupdate to the repeat library
         pass
 
+
+    def cluster_sequences(self):
+        # TODO cluster together the repeats to decrease the library size
+        pass
