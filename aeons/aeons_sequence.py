@@ -205,7 +205,8 @@ class SequenceAVA:
                     # after filtering choose the link we retain
                     # using some characteristic, i.e. largest resulting sequence
                     # other options: alignment_block_length ..
-                    metric = [rec.qlen + rec.tlen for rec in avas.values()]
+                    # metric = [rec.qlen + rec.tlen for rec in avas.values()]
+                    metric = [rec.alignment_block_length for rec in avas.values()]
                     targets = list(avas.keys())
                     max_idx = np.argmax(metric)
                     chosen_t, chosen_t_side = targets[max_idx]
@@ -265,31 +266,6 @@ class SequenceAVA:
             logging.info(f"stderr: \n {stderr}")
         return True
 
-
-    def ava2gt(self):
-        # indexing ava_dict returns node, dict for each end
-        edges = []
-        processed_edges = set()
-        for node, edge_dict in self.ava_dict.items():
-            for side, avas in edge_dict.items():
-                # no overlaps on the end of this node
-                if not avas:
-                    continue
-
-                for (tnode, tside), _ in avas.items():
-                    source = f'{node}-{side}'
-                    target = f'{tnode}-{tside}'
-                    edge = (source, target)
-                    edge_r = (target, source)
-                    if edge in processed_edges:
-                        continue
-                    elif edge_r in processed_edges:
-                        continue
-                    else:
-                        edges.append(edge)
-                        processed_edges.add(edge)
-                        processed_edges.add(edge_r)
-        return edges
 
 
 class Sequence:
