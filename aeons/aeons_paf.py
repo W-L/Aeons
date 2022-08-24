@@ -170,7 +170,7 @@ class PafLine:
             if self.qstart > (self.tlen - self.tend):
                 # A overlaps B
                 # a + b -
-                return 4, 'L', 'R'    # TODO this used to be R R, but I think was wrong
+                return 4, 'R', 'R'    # should this be LR?
             else:
                 # B overlaps A
                 # b + a -
@@ -178,7 +178,7 @@ class PafLine:
         elif (self.qlen - self.qstart) > self.tend:
             # A overlaps B
             # a - b +
-            return 4, 'R', 'L'   # TODO used to be L L, but I think was wrong
+            return 4, 'L', 'L'   # should this be RL?
         else:
             # B overlaps A
             # b - a +
