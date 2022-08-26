@@ -35,6 +35,12 @@ def execute(command):
     return stdout, stderr
 
 
+def spawn(comm):
+    running = subprocess.Popen(comm, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                               encoding='utf-8', shell=True)
+    return running
+
+
 def write_logs(stdout, stderr, basename):
     # write stdout and stderr from subprocess to file
     with open(f'{basename}.out', 'a') as outf:
@@ -125,11 +131,17 @@ def readfq(fp):
 
 
 
-def init_logger(logfile):
+def init_logger(logfile, args):
     import logging
     logging.basicConfig(format='%(asctime)s %(message)s',
                         level=logging.INFO,
                         handlers=[logging.FileHandler(f"{logfile}"), logging.StreamHandler()])
+
+    logging.info("AEONS")
+    logging.info('\n')
+    for a, aval in args.__dict__.items():
+        logging.info(f'{a} {aval}')
+    logging.info('\n')
 
 
 
@@ -265,7 +277,7 @@ def redotable(
     # run redotable to create a dotplot compared to a reference
     comm = f"{prg} --width {size} --height {size} --reordery {ref} {fa} {out}"
     print(comm)
-    stdout, stderr = execute(comm)
+    stdout, stderr = spawn(comm)
     write_logs(stdout, stderr, logdir)
 
 
