@@ -35,6 +35,8 @@ class PafLine:
             tags_parsed = parse_tags(record[core:])
             self.align_score = int(tags_parsed.get("AS", 0))
             self.cigar = tags_parsed.get("cg", None)
+            self.s1 = tags_parsed.get("s1", 0)
+            # self.dv = tags_parsed.get('dv', 0)
 
         # markers for trimming
         self.qprox = False
