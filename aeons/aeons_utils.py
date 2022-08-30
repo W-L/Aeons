@@ -228,7 +228,8 @@ def random_sparse(size, dens):
 
 
 def random_id(k=20):
-    import random, string
+    import random
+    import string
     x = ''.join(random.choices(string.ascii_letters + string.digits, k=k))
     return x
 
@@ -259,8 +260,8 @@ def ascii_hist_values(values, max_symbols=50):
     scaling_factor = max_symbols / max_val
     scaled_counts = norm_counts * scaling_factor
     # add a line for each of the bins with their respective counts
-    for bin, original_count, scaled_count in zip(bins, counts, scaled_counts):
-        ret.append(" {:>8.2f} | {:<7,d} | {:s}".format(bin, original_count, "*" * int(scaled_count)))
+    for binn, original_count, scaled_count in zip(bins, counts, scaled_counts):
+        ret.append(" {:>8.2f} | {:<7,d} | {:s}".format(binn, original_count, "*" * int(scaled_count)))
     # final lines to make it look nice and report total count
     ret.append("{:s} | {:s} | {:s}".format('-' * 8, '-' * 7, '-' * 7))
     ret.append("{:>8s} | {:<7,d}".format('N=', total))
@@ -268,12 +269,9 @@ def ascii_hist_values(values, max_symbols=50):
 
 
 
-def redotable(
-    fa, out,
-    prg='/home/lukas/software/redotable/redotable_v1.1/redotable',
-    ref='/home/lukas/Desktop/Aeons/data/ecoli/ecoli_k12_U00096_3.fa',
-    size=1000,
-    logdir='redotable_log'):
+def redotable(fa, out, prg='/home/lukas/software/redotable/redotable_v1.1/redotable',
+              ref='/home/lukas/Desktop/Aeons/data/ecoli/ecoli_k12_U00096_3.fa', size=1000,
+              logdir='redotable_log'):
     # run redotable to create a dotplot compared to a reference
     comm = f"{prg} --width {size} --height {size} --reordery {ref} {fa} {out}"
     print(comm)
@@ -286,21 +284,21 @@ def redotable(
 def chunk_data(data, window_size, overlap_size=0):
     from numpy.lib.stride_tricks import as_strided as ast
     # put into column-vector
-    data = data.reshape((-1,1))
+    data = data.reshape((-1, 1))
     # get number of overlapping windows that fit into the data
     num_windows = (data.shape[0] - window_size) // (window_size - overlap_size) + 1
     overhang = data.shape[0] - (num_windows*window_size - (num_windows-1)*overlap_size)
     # if there's overhang, need an extra window and a zero pad on the data
     if overhang != 0:
         num_windows += 1
-        newdata = np.zeros((num_windows*window_size - (num_windows-1)*overlap_size,data.shape[1]))
-        newdata[:data.shape[0]] = data
+        newdata = np.zeros((num_windows * window_size - (num_windows - 1) * overlap_size, data.shape[1]))
+        newdata[: data.shape[0]] = data
         data = newdata
 
     sz = data.dtype.itemsize
     ret = ast(data,
-              shape=(num_windows,window_size*data.shape[1]),
-              strides=((window_size-overlap_size)*data.shape[1]*sz,sz))
+              shape=(num_windows, window_size*data.shape[1]),
+              strides=((window_size - overlap_size) * data.shape[1] * sz, sz))
     return ret
 
 
@@ -311,6 +309,7 @@ def separate_by_species(paf):
     # these need to be in the headers of the references mapped against
     ref_names = ["lm", "pa", "bs", "sc", "ec", "se", "lf", "ef", "cn", "sa"]
     # function to open a file for each ref_name
+
     def open_files(ref_names):
         fhs = {}
         with ExitStack() as cm:
@@ -318,6 +317,7 @@ def separate_by_species(paf):
                 fhs[name] = cm.enter_context(open(f'zymo_even_on_accurate-{name}.paf', 'a'))
             cm.pop_all()
             return fhs
+
     fhs = open_files(ref_names)
     # loop through the inputfile
     # and separate out into individual files
