@@ -13,9 +13,10 @@ from .aeons_kmer import euclidean_dist, euclidean_threshold
 
 class SequenceAVA:
 
-    def __init__(self, paf, tetra=False):
+    def __init__(self, paf, filters, tetra=False):
         self.paf = paf
         self.gfa = f'{paf}.gfa'
+        self.filters = filters
         self.ava_dict = defaultdict(lambda: defaultdict(dict))  # 2 levels of defaultdict
         self.records = []
         self.tetra = tetra    # whether to use the tetramer distance to filter overlaps
@@ -28,38 +29,31 @@ class SequenceAVA:
         self.records = []  # used for trimming
         self.overlaps = {}  # used for trimming, and increments
         internals = {}  # used for trimming, and increments
-        containments = defaultdict(list)  # collect, used for coverage incrementing
+        containments = {}  # collect, used for coverage incrementing
         ovl = 0
 
         with open(paf, 'r') as fh:
             for record in fh:
                 rec = PafLine(record)
-
-                # if one of the nodes is already contained, skip
-                # if rec.qname in is_contained or rec.tname in is_contained:
-                #     skip += 1
-                #     continue
-
-                # if '6Pi' in rec.qname and 'HAZK' in rec.tname:
-                #     print("break")
+                # check if this mapping passes the filters
+                is_filtered = rec.filter(filters=self.filters)
+                if is_filtered:
+                    skip += 1
+                    continue
 
                 # classify the alignment
                 rec.classify()
 
-                if rec.c == 0:
-                    # short or self-alignment
-                    skip += 1
-                    continue
                 if rec.c == 1:
                     # internal match, use to increment
                     internals[(rec.qname, rec.tname)] = rec
                     continue
                 elif rec.c == 2:
                     # first contained
-                    containments[rec.qname].append(rec)
+                    containments[(rec.qname, rec.tname)] = rec
                 elif rec.c == 3:
                     # second contained
-                    containments[rec.tname].append(rec)
+                    containments[(rec.tname, rec.qname)] = rec
                 elif rec.c in {4, 5}:
                     # append the alignment to both the query and the target
                     self.ava_dict[rec.qname][rec.qside][(rec.tname, rec.tside)] = rec
@@ -71,7 +65,6 @@ class SequenceAVA:
 
                 # keep the current records in a list
                 self.records.append(rec)
-
 
         logging.info(f"ava load: skip {skip}, cont {len(containments.keys())} ovl: {ovl}")
         return containments, self.overlaps, internals
@@ -267,6 +260,26 @@ class SequenceAVA:
         return True
 
 
+    @staticmethod
+    def source_union(edges0, edges1):
+        # given some sets of edge dicts, return the union of source nodes
+        sources0 = zip(*edges0.keys())
+        sources1 = zip(*edges1.keys())
+        try:
+            set0 = set(list(sources0)[0])
+        except IndexError:
+            set0 = set()
+
+        try:
+            set1 = set(list(sources1)[0])
+        except IndexError:
+            set1 = set()
+
+        source_union = set0 | set1
+        return source_union
+
+
+
 
 class Sequence:
 
@@ -275,7 +288,7 @@ class Sequence:
         self.seq = seq
 
         if cov is None:
-            self.cov = np.zeros(shape=len(seq), dtype='uint16')
+            self.cov = np.ones(shape=len(seq), dtype='uint16')
         else:
             self.cov = cov
 
@@ -360,7 +373,7 @@ class Sequence:
 
 class SequencePool:
 
-    def __init__(self, sequences=None, name="dummy", min_len=1000, out_dir="dummy", threads=48):
+    def __init__(self, sequences=None, name="dummy", min_len=3000, out_dir="dummy", threads=48):
         # a unified pool for reads and contigs with persistent AVA
         self.min_len = min_len
         self.out_dir = out_dir
@@ -512,7 +525,6 @@ class SequencePool:
         return new_ava, new_onto_pool
 
 
-
     def remove_sequences(self, sequences):
         # given some ids, remove them from the readpool
         # e.g. after making new paths, we want to remove the sequences used to construct them
@@ -573,123 +585,127 @@ class SequencePool:
         return seq_dict
 
 
+    def get_next_increment_edges(self, edges, previous_edges=None):
+        # if no argument given, get the edges with in-degree of 0
+        if not previous_edges:
+            sources, targets = zip(*edges.keys())
+            next_sources = set(sources) - set(targets)
+        # otherwise grab the edges starting at the previous targets
+        else:
+            next_sources = [t for (s, t) in previous_edges.keys()]
+        # get the next edges to increment
+        next_edges = {(s, t): edge for (s, t), edge in edges.items() if s in next_sources}
+        # remove the next edges
+        for e in next_edges:
+            edges.pop(e)
+        return edges, next_edges
 
-    def increment(self, containment, overlaps, internals):
+
+    def affect_increment(self, source, target, rec):
+        # relevant coordinates of this containment
+        ostart, oend, olen, cstart, cend, clen = rec.grab_increment_coords()
+
+        # grab the source coverage
+        cont_cov = self.sequences[source].cov[cstart: cend]
+
+        # adjust length of coverage array
+        if clen == olen:
+            pass
+        elif clen > olen:
+            cont_cov = cont_cov[: olen]
+        elif clen < olen:
+            cont_cov = np.pad(cont_cov, (0, olen - clen), mode='edge')
+
+        # account for reverse complement
+        if rec.rev:
+            cont_cov = cont_cov[::-1]
+        else:
+            pass
+
+        # add the source coverage to target coverage
+        self.sequences[target].cov[ostart: oend] += cont_cov
+        # limit coverage to 100 to prevent mess
+        self.sequences[target].cov[np.where(self.sequences[target].cov > 100)] = 100
+
+        # add the source as constituent of target
+        if '*' not in source:
+            self.sequences[target].atoms.add(source)
+
+
+
+    def increment(self, containment, overlaps=None, internals=None):
         # use the records of containment to increase the coverage counts & borders
-        # containment: defaultdict with read_id: list of mappings
-        # first check which ava to ignore
-        for rid, rec_list in containment.items():
-            for rec in rec_list:
-                if rid == rec.qname:
-                    other = rec.tname
-                    other_start = rec.tstart
-                    other_end = rec.tend
-                    other_seqlen = rec.tlen
-                    self_start = rec.qstart
-                    self_end = rec.qend
-                else:
-                    other = rec.qname
-                    other_start = rec.qstart
-                    other_end = rec.qend
-                    other_seqlen = rec.qlen
-                    self_start = rec.tstart
-                    self_end = rec.tend
+        # containment = (contained, container) : rec
+        edges = deepcopy(containment)
+
+        # gtg = gt.Graph(directed=True)
+        # node_names = gtg.add_edge_list(edges, hashed=True, hash_type="string")
+        # gtg.vp["names"] = node_names
+        # graph = gtg
+        # c = graph.degree_property_map("in")
+        # c = c.copy("float")
+        # graph_draw(graph, vertex_fill_color=c, vcmap=cm.gist_heat, vorder=c, vertex_text=c, output="containment.pdf")
+        # dist = gt.topology.shortest_distance(graph)
+        # for d in dist:
+        #     d = np.array(d)
+        #     print(d[np.where(d != 2147483647)[0]])
+
+        # get the first edges to increment, i.e. those with 0 in-degree
+        edges, next_edges = self.get_next_increment_edges(edges, previous_edges=None)
+        # affect the increments
+        for (source, target), rec in next_edges.items():
+            self.affect_increment(source, target, rec)
+        previous_edges = next_edges
+
+        while len(edges) > 0:
+            # get the next edges to deal with
+            edges, next_edges = self.get_next_increment_edges(edges, previous_edges=previous_edges)
+            for (source, target), rec in next_edges.items():
+                self.affect_increment(source, target, rec)
+            previous_edges = next_edges
 
 
-                # add as constituent atom
-                if '*' not in rid:
-                    self.sequences[other].atoms.add(rid)
+        # TODO also use increments from overlaps between reads
+        # not sure we even want this to be honest
+        # if we only use true increments, we might capture more true positives
+        # simple for now, could incorporate some way of merging arrays
+        # other_inc = internals | overlaps
+        # for (query, target), rec in other_inc.items():
+        #     try:
+        #         qcov = np.copy(self.sequences[query].cov)
+        #         # qbor = self.borders[query]
+        #     except KeyError:
+        #         qcov = np.zeros(shape=rec.qlen, dtype='uint16')
+        #         # qbor = np.zeros(shape=rec.qlen, dtype='uint16')
+        #     qcov[rec.qstart: rec.qend] += 1
+        #     qcov[np.where(qcov > 100)] = 100
+        #     self.sequences[query].cov = qcov
+        #     # qbor[rec.qstart] += 1
+        #     # qbor[rec.qend - 1] += 1
+        #
+        #     try:
+        #         tcov = np.copy(self.sequences[target].cov)
+        #         # tbor = self.coverages[target]
+        #     except KeyError:
+        #         tcov = np.zeros(shape=rec.tlen, dtype='uint16')
+        #         # tbor = np.zeros(shape=rec.tlen, dtype='uint16')
+        #     tcov[rec.tstart: rec.tend] += 1
+        #     tcov[np.where(tcov > 100)] = 100
+        #     self.sequences[target].cov = tcov
+        #     # tbor[rec.tstart] += 1
+        #     # tbor[rec.tend - 1] += 1
+        #
+        #     # rec.plot()
 
-                # remove if other is also contained
-                # if other in cont:
-                #     continue
-                # else:
-
-                # TODO window: is done in saving to file at the moment, could be done earlier
-
-                # check if we have coverage on the contained one already
-                try:
-                    self_len = self_end - self_start
-                    other_len = other_end - other_start
-                    cont_cov = self.sequences[rid].cov[self_start: self_end]
-                    cont_cov += 1
-                    # cont_borders = self.borders[rid][self_start: self_end]
-                    # cont_borders[0] += 1
-                    # cont_borders[-1] += 1
-                    # make sure the arrays are the same length before adding the coverage
-                    if self_len == other_len:
-                        pass
-                    elif self_len > other_len:
-                        cont_cov = cont_cov[: other_len]
-                        # cont_borders = cont_borders[: other_len]
-                    elif self_len < other_len:
-                        cont_cov = np.pad(cont_cov, (0, other_len - self_len), mode='edge')
-                        # cont_borders = np.pad(cont_borders,
-                        # (0, other_len - self_len), mode='constant', constant_values=0)
-
-                    # account for reverse complement
-                    if rec.rev:
-                        cont_cov = cont_cov[::-1]
-                        # cont_borders = cont_borders[::-1]
-                    else:
-                        pass
-
-                    self.sequences[other].cov[other_start: other_end] += cont_cov
-                    # limit coverage to 100 to prevent mess
-                    self.sequences[other].cov[np.where(self.sequences[other].cov > 100)] = 100
-                    # self.borders[other][other_start: other_end] += cont_borders
-                # if the contained seq has no array for some reason
-                except KeyError:
-                    try:
-                        self.sequences[other].cov[other_start: other_end] += 1
-                        # self.borders[other][other_start] += 1
-                        # self.borders[other][other_end] += 1
-                    except KeyError:
-                        other_cov = np.zeros(shape=other_seqlen, dtype='uint16')
-                        # other_borders = np.zeros(shape=other_seqlen, dtype='uint16')
-                        other_cov[other_start: other_end] += 1
-                        # other_borders[other_start] += 1
-                        # other_borders[other_end] += 1
-                        self.sequences[other].cov = other_cov
-                        # self.borders[other] = other_borders
-
-        # also use increments from overlaps between reads
-        other_inc = internals | overlaps
-        # TODO simple for now, could incorporate some way of merging arrays
-        for (query, target), rec in other_inc.items():
-            try:
-                qcov = np.copy(self.sequences[query].cov)
-                # qbor = self.borders[query]
-            except KeyError:
-                qcov = np.zeros(shape=rec.qlen, dtype='uint16')
-                # qbor = np.zeros(shape=rec.qlen, dtype='uint16')
-            qcov[rec.qstart: rec.qend] += 1
-            qcov[np.where(qcov > 100)] = 100
-            self.sequences[query].cov = qcov
-            # qbor[rec.qstart] += 1
-            # qbor[rec.qend - 1] += 1
-
-            try:
-                tcov = np.copy(self.sequences[target].cov)
-                # tbor = self.coverages[target]
-            except KeyError:
-                tcov = np.zeros(shape=rec.tlen, dtype='uint16')
-                # tbor = np.zeros(shape=rec.tlen, dtype='uint16')
-            tcov[rec.tstart: rec.tend] += 1
-            tcov[np.where(tcov > 100)] = 100
-            self.sequences[target].cov = tcov
-            # tbor[rec.tstart] += 1
-            # tbor[rec.tend - 1] += 1
-
-            # rec.plot()
+        # for removal: return the ids of the contained sequences
+        contained_ids = [s for (s, t) in containment.keys()]
+        return contained_ids
 
 
 
-
-
-    def declare_contigs(self, min_len):
+    def declare_contigs(self, min_contig_len):
         # collect a subdict of sequences that are longer than some limit
-        contigs = {header: seqo for header, seqo in self.sequences.items() if len(seqo.seq) > min_len}
+        contigs = {header: seqo for header, seqo in self.sequences.items() if len(seqo.seq) > min_contig_len}
         contig_pool = SequencePool(sequences=contigs)
         return contig_pool
 
