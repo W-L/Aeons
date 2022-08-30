@@ -41,6 +41,18 @@ class PafLine:
         # markers for trimming
         self.qprox = False
         self.tprox = False
+        # dummy inits
+        self.maplen = None
+
+
+    def filter(self, filters):
+        # like classify, pack all conditions in here
+        if self._self_aligned():
+            return True
+        if self.map_length() < filters.min_map_len:
+            return True
+        if self.s1 < filters.min_s1:
+            return True
 
 
     def overhang(self):
@@ -56,35 +68,26 @@ class PafLine:
 
 
     def map_length(self):
-        maplen = max(self.qend - self.qstart, self.tend - self.tstart)
-        return maplen
+        if not self.maplen:
+            self.maplen = min(self.qend - self.qstart, self.tend - self.tstart)
+        return self.maplen
 
 
     def classify(self):
         # classify the alignment according to miniasm alg 5
+        # these are already filtered
         c = -1
-        lim = 1000
 
-        if self._self_aligned():
-            c = 0
-        # elif self.map_length() < lim:
-        #     c = 0
-        elif self._internal_match():
+        if self._internal_match():
             c = 1
         elif self._first_contained():
             c = 2
         elif self._second_contained():
             c = 3
-        # elif self._first_contained_fallback():
-        #     c = 2
-        # elif self._second_contained_fallback():
-        #     c = 3
-        elif self._self_aligned_partials():
-            c = 0
         else:
             pass
 
-        # if it is still unclassified, run the overlap orientation detect
+        # if still unclassified -> overlap
         if c < 0:
             c, qside, tside = self._overlap_orientation()
             self.qside = qside
@@ -95,11 +98,6 @@ class PafLine:
         if c == 1:
             if self.internal_match_is_overlap():
                 c = 6  # class 6: needs trimming
-
-        # short reads are only considered if they are fully contained to avoid mess
-        if self.map_length() < lim:
-            if c not in {2, 3}:
-                c = 0
 
         # assign classification
         self.c = c
@@ -187,18 +185,18 @@ class PafLine:
             return 5, 'L', 'L'
 
 
-    def _self_aligned_partials(self):
-        # split merged headers
-        h1rs = set(self.qname.replace('^', '').replace('%', '').split('_'))
-        h2rs = set(self.tname.replace('^', '').replace('%', '').split('_'))
-        h1rs = {s for s in h1rs if len(s) > 10}
-        h2rs = {s for s in h2rs if len(s) > 10}
-        header_intersect = h1rs & h2rs
-        # if both alignments contain a shared header
-        if len(header_intersect) > 0:
-            return True
-        else:
-            return False
+    # def _self_aligned_partials(self):
+    #     # split merged headers
+    #     h1rs = set(self.qname.replace('^', '').replace('%', '').split('_'))
+    #     h2rs = set(self.tname.replace('^', '').replace('%', '').split('_'))
+    #     h1rs = {s for s in h1rs if len(s) > 10}
+    #     h2rs = {s for s in h2rs if len(s) > 10}
+    #     header_intersect = h1rs & h2rs
+    #     # if both alignments contain a shared header
+    #     if len(header_intersect) > 0:
+    #         return True
+    #     else:
+    #         return False
 
 
     def _self_aligned(self):
@@ -322,6 +320,26 @@ class PafLine:
 
         return sid, trim_start, trim_stop, other
 
+
+    def grab_increment_coords(self):
+        # grab the coordinates of containment
+        if self.c == 2:
+            ostart = self.tstart
+            oend = self.tend
+            cstart = self.qstart
+            cend = self.qend
+        elif self.c == 3:
+            ostart = self.qstart
+            oend = self.qend
+            cstart = self.tstart
+            cend = self.tend
+        else:
+            print("this method should only be called on contained reads")
+            return
+
+        olen = oend - ostart
+        clen = cend - cstart
+        return ostart, oend, olen, cstart, cend, clen
 
 
 
