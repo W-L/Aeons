@@ -1,6 +1,6 @@
 # CUSTOM
 from .aeons_utils import execute, find_blocks_generic, random_id, empty_file,\
-    init_logger, read_fa, readfq, MyArgumentParser
+    init_logger, read_fa, readfq, MyArgumentParser, spawn, redotable
 from .aeons_sampler import FastqStream, FastqStream_mmap
 from .aeons_readlengthdist import ReadlengthDist
 from .aeons_merge import ArrayMerger
@@ -58,17 +58,22 @@ class Constants:
         self.alpha = 300
         self.window = 1                 # whether strategies are written per base or downsized
         self.wait = 60                  # waiting time in live version
-        self.min_len = 1000
-        self.contig_lim = 30000         # what to consider as contigs, when writing for mapping against
         self.cov_wait = 2
-
 
         # TODO tmp
         # self.redotable = "/hps/software/users/goldman/lukasw/redotable/redotable_v1.1/redotable"
         self.redotable = "/home/lukas/software/redotable/redotable_v1.1/redotable"
 
+    def __repr__(self):
+        return str(self.__dict__)
 
 
+class Filters:
+    def __init__(self):
+        self.min_seq_len = 3_000  # everything shorter than this will not even make it into the SequencePool
+        self.min_contig_len = 30_000  # what to write out for mapping against
+        self.min_s1 = 200
+        self.min_map_len = 2_000
 
     def __repr__(self):
         return str(self.__dict__)
@@ -133,7 +138,7 @@ class SparseGraph():
         self.adjacency = adj
         self.size = adj.shape[0]
         self.cov = cov
-        return n_nodes, adj, cov
+        return edges, cov
 
 
 
@@ -432,7 +437,7 @@ class SparseGraph():
 
         # cover X% of ccl
         # this is steps in addition to the first transition
-        n_steps = int(ccl[-1] / self.args.node_size)
+        n_steps = int(ccl[-3] / self.args.node_size)
 
         for i in range(n_steps):
             # increment transition step
@@ -496,10 +501,28 @@ class SparseGraph():
 
 
 
-    def process_graph(self, gfa):
+    def process_graph(self, gfa, batch):
         # WRAPPER
         # load new graph and get component ends
-        self.load_adjacency(gfa=gfa)
+        edges, cov = self.load_adjacency(gfa=gfa)
+
+        # if batch % 10 == 0:
+        #     # TMP visualise
+        #     import graph_tool as gt
+        #     from matplotlib import cm
+        #     gtg = gt.Graph(directed=False)
+        #     node_names = gtg.add_edge_list(edges, hashed=True, hash_type="int")
+        #     gtg.vp["names"] = node_names
+        #     cov_pm = gtg.new_vp("float")
+        #     cov_pm_text = gtg.new_vp("int32_t")
+        #     cov_pm.a = cov
+        #     cov_pm_text.a = cov
+        #     gtg.vp['cov'] = cov_pm
+        #     gtg.vp['cov_text'] = cov_pm_text
+        #     from graph_tool.draw import graph_draw
+        #     graph_draw(gtg, vertex_fill_color=gtg.vp['cov'], vcmap=cm.gist_heat, vertex_text=gtg.vp['cov_text'], output=f"gtg_cov_{batch}.pdf")
+
+
         self.get_components()
         # self.graph.update_scores()
 
@@ -811,12 +834,7 @@ class AeonsRun:
         empty_file(f'00_reads/{self.args.name}_0_aeons.fa')
 
         # initialise a log file in the output folder
-        init_logger(logfile=f'{args.out_dir}/{args.name}.aeons.log')
-
-        logging.info("AEONS")
-        for a, aval in self.args.__dict__.items():
-            logging.info(f'{a} {aval}')
-        logging.info('\n')
+        init_logger(logfile=f'{args.out_dir}/{args.name}.aeons.log', args=args)
 
         # init fastq stream
         # continous blocks for local (i.e. for reading from usb)
@@ -827,9 +845,9 @@ class AeonsRun:
         # else:
         #     self.stream = FastqStream(source=self.args.fq, bsize=self.args.bsize,
         #                               seed=self.args.seed, workers=self.args.workers)
-
-        self.pool = SequencePool(name=args.name, min_len=args.min_len, out_dir=args.out_dir)
-        self.ava = SequenceAVA(paf=f'{args.name}.ava', tetra=args.tetra)
+        self.filt = Filters()
+        self.pool = SequencePool(name=args.name, min_len=self.filt.min_seq_len, out_dir=args.out_dir)
+        self.ava = SequenceAVA(paf=f'{args.name}.ava', tetra=args.tetra, filters=self.filt)
         self.rl_dist = ReadlengthDist(mu=args.mu)
 
 
@@ -845,7 +863,7 @@ class AeonsRun:
                 self.load_init_batches(binit=self.args.binit)
             # if binit is set to 0, we calculate how many batches it takes to cover the genome x times
             else:
-                binit = self.wait_for_batches(bsize=self.args.bsize, cov=self.args.cov_wait)
+                binit = self.wait_for_batches(bsize=self.args.bsize, cov=self.args.cov_wait, gsize=self.args.gsize)
                 logging.info(f"loading {binit} batches...")
                 self.load_init_batches(binit=binit)
         else:
@@ -857,7 +875,7 @@ class AeonsRun:
         self.prep_first_ava()
 
         # initialise a RepeatFilter from first AVA
-        self.repeat_filter = RepeatFilter(name=args.name, ava_dict=self.ava.ava_dict, seqpool=self.pool.sequences)
+        self.repeat_filter = RepeatFilter(name=args.name, ava_dict=self.ava.ava_dict, seqpool=self.pool.sequences, filters=self.filt)
         self.remove_seqs(sequences=self.repeat_filter.affected_sids)
 
         # create first asm
@@ -927,7 +945,7 @@ class AeonsRun:
         for header in prebuilt.keys():
             self.read_sources[header] = preload
 
-        contig_pool = SequencePool(sequences=prebuilt, min_len=self.args.min_len)
+        contig_pool = SequencePool(sequences=prebuilt, min_len=self.filt.min_seq_len)
         # preload also some coverage, if we trust these contigs already
         # i.e. if we want to focus on component ends, not on covering everything all over again
         if trusted:
@@ -947,37 +965,27 @@ class AeonsRun:
 
         # load paf into ava object - includes filtering
         containments, overlaps, internals = self.ava.load_ava(paf=paf)
-        self.pool.increment(containment=containments, overlaps=overlaps, internals=internals)
-        self.remove_seqs(sequences=containments.keys())
+        contained_ids = self.pool.increment(containment=containments) # , overlaps=overlaps, internals=internals)
+        self.remove_seqs(sequences=contained_ids)
 
         # after using coverage info, filter sequences before merging
         # here we only remove from AVA, otherwise we can't map against the contigs
-        short_seqs = {header for header, seqo in self.pool.sequences.items() if len(seqo.seq) < self.args.min_len_ovl}
-        if short_seqs:
-            self.ava.remove_from_ava(sequences=short_seqs)
+        # short_seqs = {header for header, seqo in self.pool.sequences.items() if len(seqo.seq) < self.filt.min_len_ovl}
+        # if short_seqs:
+        #     self.ava.remove_from_ava(sequences=short_seqs)
 
 
 
     def create_init_asm(self):
         # single links
         self.ava.single_links(seqpool=self.pool)
-
         # merge new sequences
         new_pool = self.merge_overlaps(paf=f'{self.ava.paf}.deg', gfa=self.ava.gfa)
-
         # add new sequences to the dict and to the ava
-        new_ava, new_onto_pool = self.pool.add2ava(new_sequences=new_pool)
-        self.pool.ingest(new_pool)
-        # load new ava files
-        cont_new, _, _ = self.ava.load_ava(new_ava)
-        cont_onto, _, _ = self.ava.load_ava(new_onto_pool)
-        cont = cont_new.keys() | cont_onto.keys()
-        self.remove_seqs(sequences=cont)
-
+        self.add_new_sequences(sequences=new_pool, increment=False)
         # write the current pool to file for mapping against
-        contigs = self.pool.declare_contigs(min_len=self.args.contig_lim)
+        contigs = self.pool.declare_contigs(min_contig_len=self.filt.min_contig_len)
         self.pool.write_seq_dict(seq_dict=contigs.seqdict(), file=self.pool.contig_fa)
-
 
 
 
@@ -1323,7 +1331,7 @@ class AeonsRun:
             # vm = ValidationMapping(mapper=self.reference_mapper, merged_seq=new_seqo, seqpool=self.pool)
 
         self.remove_seqs(sequences=used_rids)
-        new_pool = SequencePool(sequences=new_sequences, min_len=self.args.min_len)
+        new_pool = SequencePool(sequences=new_sequences, min_len=self.filt.min_seq_len)
         return new_pool
 
 
@@ -1380,15 +1388,15 @@ class AeonsRun:
         cont_onto, ovl_onto, int_onto = self.ava.load_ava(ava_onto_pool)
         if increment:
             self.pool.increment(containment=cont_onto, overlaps=ovl_onto, internals=int_onto)
-        cont = cont_new.keys() | cont_onto.keys()
+        cont = SequenceAVA.source_union(edges0=cont_new, edges1=cont_onto)
         self.remove_seqs(sequences=cont)
         # TODO here
         # after taking the coverage information, we can remove sequences that are too short
         # to contribute to contigs from the pool. They won't be useful for anything else
         # could also implement this earlier, i.e. in load_ava to prevent putting stuff into ava_dict
         # which we then remove again here anyway. But then load_ava is already complex enough
-        short_seqs = {header for header, seqo in sequences.sequences.items() if len(seqo.seq) < self.args.min_len_ovl}
-        self.remove_seqs(sequences=short_seqs)
+        # short_seqs = {header for header, seqo in sequences.sequences.items() if len(seqo.seq) < self.filt.min_len_ovl}
+        # self.remove_seqs(sequences=short_seqs)
 
 
 
@@ -1398,12 +1406,12 @@ class AeonsRun:
         # run AVA for the pool to find overlaps and remove contained sequences
         logging.info('')
         logging.info("ava pool")
-        contigs = self.pool.declare_contigs(min_len=self.args.contig_lim)
+        contigs = self.pool.declare_contigs(min_contig_len=self.filt.min_contig_len)
         pool_paf = self.pool.run_ava(sequences=contigs.seqdict(), fa=self.pool.fa, paf=self.pool.ava)
         pool_contained, _, _ = self.ava.load_ava(paf=pool_paf)
-        contained_ids = pool_contained.keys()
-        logging.info(f'removing {len(contained_ids)} contained sequences from pool')
-        self.remove_seqs(sequences=contained_ids)
+        cont = SequenceAVA.source_union(edges0=pool_contained, edges1={})
+        logging.info(f'removing {len(cont)} contained sequences from pool')
+        self.remove_seqs(sequences=cont)
 
 
     def trim_sequences(self):
@@ -1510,7 +1518,7 @@ class AeonsRun:
         # filter sequences with repeats at the end
         reads_filtered = self.repeat_filter.filter_batch(seq_dict=reads_decision)
         # load new sequences, incl length filter
-        sequences = SequencePool(sequences=reads_filtered, min_len=self.args.min_len)
+        sequences = SequencePool(sequences=reads_filtered, min_len=self.filt.min_seq_len)
         # add new sequences to AVA
         self.add_new_sequences(sequences=sequences)
         # check for overlaps and containment in pool
@@ -1523,10 +1531,10 @@ class AeonsRun:
         new_sequences = self.merge_overlaps(paf=f'{self.ava.paf}.deg', gfa=self.ava.gfa)
         self.add_new_sequences(sequences=new_sequences, increment=False)
 
-        contigs = self.pool.declare_contigs(min_len=self.args.contig_lim)
+        contigs = self.pool.declare_contigs(min_contig_len=self.filt.min_contig_len)
         if self.args.polish:
             cpolished = self.pool.polish_sequences(contigs=contigs, read_sources=self.read_sources)
-            contigs = self.pool.declare_contigs(min_len=self.args.contig_lim)
+            contigs = self.pool.declare_contigs(min_contig_len=self.filt.min_contig_len)
             self.ava.remove_from_ava(sequences=cpolished)
 
         # write the current pool to file for mapping against
@@ -1537,7 +1545,7 @@ class AeonsRun:
         # wrapper for graph processing to get new strategy
         self.graph = SparseGraph(args=self.args, approx_ccl=self.rl_dist.approx_ccl, node_sources=node_sources, node_positions=node_positions)
         # find new strategy
-        self.strat = self.graph.process_graph(gfa=self.pool.gfa)
+        self.strat = self.graph.process_graph(gfa=self.pool.gfa, batch=self.batch)
 
         # self.strat_csv(self.strat, node2pos)  # this is for bandage viz
 
@@ -1546,10 +1554,10 @@ class AeonsRun:
 
         # if self.batch % 5 == 0:
         #     redotable(fa=self.pool.contig_fa,
-        #                           out=f'{self.pool.contig_fa}.{self.batch}.redotable.png',
-        #                           ref=self.args.ref,
-        #                           prg=self.args.redotable,
-        #                           logdir=f'{self.args.out_dir}/logs/redotable')
+        #               out=f'{self.pool.contig_fa}.{self.batch}.redotable.png',
+        #               ref=self.args.ref,
+        #               prg=self.args.redotable,
+        #               logdir=f'{self.args.out_dir}/logs/redotable')
 
         self.batch += 1
         logging.info(f"batch took: {time.time() - tic}")
@@ -1741,13 +1749,14 @@ def setup_parser():
     parser.add_argument('--dumptime', dest='dumptime', type=int, default=1, help='interval for dumping batches')
     parser.add_argument('--remote', dest='remote', type=int, default=0,
                         help='whether running local or remote, determines fastqstream access')
+    parser.add_argument('--gsize', dest='gsize', type=float, default=12e6, help='genome size estimate')
 
     parser.add_argument('--preload', dest='preload', type=str, default=None, help='path to fasta for pre-loading sequences')
     parser.add_argument('--hybrid', dest='hybrid', type=int, default=0, help='hybrid assembly, changes loading of prebuilt contigs')
     parser.add_argument('--tetra', dest='tetra', type=int, default=0, help='adds a test for tetramer freq dist before overlapping')
     parser.add_argument('--polish', dest='polish', type=int, default=0, help='whether to run contig polishing (not for scaffold mode)')
 
-    parser.add_argument('--min_len_ovl', dest='min_len_ovl', type=int, default=10000, help='add length filter before overlapping')
+    # parser.add_argument('--min_len_ovl', dest='min_len_ovl', type=int, default=5000, help='add length filter before overlapping')
     # snakemake pipeline (& redotable)
     parser.add_argument('--ref', dest='ref', type=str, default="", help='reference used in quast evaluation and redotable')
     # parser.add_argument('--snake', dest='snake', type=int, default=0, help='launch snakemake evaluation')
