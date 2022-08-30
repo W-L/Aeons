@@ -55,7 +55,10 @@ class RepeatFilter:
      - map batches to repeat library for filtering
 
     """
-    def __init__(self, name, ava_dict, seqpool):
+    def __init__(self, name, ava_dict, seqpool, filters):
+        # constant values for PafLine filtering
+        self.filters = filters
+        # name for library file
         self.library = f'{name}.repeat_lib.fa'
         lim = self.repeat_degree_limit(ava_dict)
         # collect repeat overlaps in the given ava_dict
@@ -73,7 +76,7 @@ class RepeatFilter:
         degree = self.node_degree(ava_dict)
         # make little histogram plot
         logging.info("degree distribution of initial graph")
-        print(ascii_hist_values(degree))
+        logging.info("\n" + ascii_hist_values(degree))
         # detect limit
         lim = np.quantile(degree, 0.95)
         logging.info(f"detecting repeats at degree >{lim}")
@@ -157,10 +160,11 @@ class RepeatFilter:
 
     def filter_batch(self, seq_dict):
         # takes as input a dict of sequences
+        logging.info("repeat filtering this batch of reads")
         # first map them to the library
         paf_dict = self.lm.map_sequences(seq_dict)
         # then classify the mappings
-        overlaps, containments, filter_ids = self.filter_pafdict(paf_dict)
+        filter_ids = self.filter_pafdict(paf_dict)
         # return the filtered sequence dict
         filt_dict = deepcopy(seq_dict)
         for fid in filter_ids:
@@ -170,36 +174,34 @@ class RepeatFilter:
 
     def filter_pafdict(self, paf_dict):
         # THIS IS MODELED AFTER SequenceAVA.load_ava()
-        overlaps = {}
-        containments = defaultdict(list)
         filter_ids = set()
         for rid, record_list in paf_dict.items():
             for rec in record_list:
+                # check if this mapping passes the filters
+                is_filtered = rec.filter(filters=self.filters)
+                if is_filtered:
+                    continue
+
                 # classify the alignment
                 rec.classify()
 
-                if rec.c == 0:
-                    # short or self-alignment
-                    continue
                 if rec.c == 1:
                     # internal match
                     continue
                 elif rec.c == 2:
                     # first contained
-                    containments[rec.qname].append(rec)
                     filter_ids.add(rec.qname)
                 elif rec.c == 3:
                     # second contained
-                    # and qprox? should be overlap then?
-                    # containments[rec.tname].append(rec)
+                    # if the repeat is contained within the query, we want that read!
                     continue
                 elif rec.c in {4, 5}:
-                    overlaps[(f'{rec.qname}-{rec.qside}', f'{rec.tname}-{rec.tside}')] = rec
+                    # overlaps[(f'{rec.qname}-{rec.qside}', f'{rec.tname}-{rec.tside}')] = rec
                     filter_ids.add(rec.qname)
                 else:
                     pass
         logging.info(f"repeat filtering {len(filter_ids)} sequences from this batch")
-        return overlaps, containments, filter_ids
+        return filter_ids
 
 
     def update_library(self):
