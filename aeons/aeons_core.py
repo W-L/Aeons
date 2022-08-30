@@ -866,6 +866,9 @@ class AeonsRun:
                 binit = self.wait_for_batches(bsize=self.args.bsize, cov=self.args.cov_wait, gsize=self.args.gsize)
                 logging.info(f"loading {binit} batches...")
                 self.load_init_batches(binit=binit)
+            # increment time after preloading
+            self.update_times(read_sequences=self.pool.seqdict(), reads_decision=self.pool.seqdict())
+
         else:
             self.load_init_contigs(preload=self.args.preload, trusted=self.args.hybrid)
 
