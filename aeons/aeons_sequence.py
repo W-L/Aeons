@@ -709,6 +709,9 @@ class SequencePool:
     def declare_contigs(self, min_contig_len):
         # collect a subdict of sequences that are longer than some limit
         contigs = {header: seqo for header, seqo in self.sequences.items() if len(seqo.seq) > min_contig_len}
+        if not contigs:
+            logging.info("no contigs detected. Try starting with more data")
+            exit()
         contig_pool = SequencePool(sequences=contigs)
         return contig_pool
 
@@ -849,5 +852,5 @@ class SequencePool:
         s1 = self.sequences[seq1]
         s2 = self.sequences[seq2]
         euc = euclidean_dist(s1, s2)
-        return euc <= euclidean_threshold
+        return euc < euclidean_threshold
 
