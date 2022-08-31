@@ -79,6 +79,8 @@ class RepeatFilter:
         logging.info("\n" + ascii_hist_values(degree))
         # detect limit
         lim = np.quantile(degree, 0.95)
+        if lim < 3:
+            lim = 3
         logging.info(f"detecting repeats at degree >{lim}")
         return lim
 
