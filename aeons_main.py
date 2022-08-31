@@ -24,3 +24,8 @@ while ar.batch <= args.maxb:
     ar.process_batch()
 
 ar.cleanup()
+
+#%% auto snakemake
+if args.snake:
+    from aeons.aeons_utils import launch_post_snake
+    launch_post_snake(run_name=args.name, configfile=args.snake)

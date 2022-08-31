@@ -132,6 +132,7 @@ def readfq(fp):
 
 
 def init_logger(logfile, args):
+    empty_file(logfile)
     import logging
     logging.basicConfig(format='%(asctime)s %(message)s',
                         level=logging.INFO,
@@ -327,3 +328,44 @@ def separate_by_species(paf):
             ref = ll[5].split('_')[0]
             # write line to correct file
             fhs[ref].write(line)
+
+
+
+# for launching the snakemake after the run automatically
+def get_dump_number(run_name):
+    logfile = f'out_{run_name}/{run_name}.aeons.log'
+    n = 0
+    with open(logfile, 'r') as lf:
+        for line in lf:
+            if "dump aeons" not in line:
+                continue
+            # dump line
+            ll = line.split('.')[0].split('#')[-1]
+            dump_n = int(ll)
+            if dump_n > n:
+                n = dump_n
+    return n - 1
+
+
+def launch_post_snake(configfile, run_name):
+    # get number of dumps first
+    dumps = get_dump_number(run_name)
+
+    comm = f'bsub -q short -M 4G -n 1 -o snake01.out -e snake01.err ' \
+           f'"snakemake ' \
+           f'-s ../code/snakesembly/snakesembly_post.smk ' \
+           f'--profile lsf_short ' \
+           f'--configfile {configfile} ' \
+           f'--config dumps={dumps} ' \
+           f'--config run_name={run_name} "'
+
+    print("\nlaunching snakemake post aeons\n")
+    print(comm)
+    snakeout, snakeerr = execute(comm)
+    print()
+    print(snakeout)
+    print()
+    print(snakeerr)
+    print()
+
+
