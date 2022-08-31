@@ -195,7 +195,7 @@ class IntraProb:
     def calc_threshold(self):
         e = np.arange(0, 0.1, 0.001)
         ip = self.intra_prob(e)
-        t = e[np.where(ip > 0.01)][-1]
+        t = e[np.where(ip > 1e-10)][-1]
         return t
 
 
