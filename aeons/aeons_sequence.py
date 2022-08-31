@@ -637,6 +637,9 @@ class SequencePool:
         # use the records of containment to increase the coverage counts & borders
         # containment = (contained, container) : rec
         edges = deepcopy(containment)
+        # if there are no increments to do
+        if not edges:
+            return []
 
         # gtg = gt.Graph(directed=True)
         # node_names = gtg.add_edge_list(edges, hashed=True, hash_type="string")
