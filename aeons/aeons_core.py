@@ -1759,6 +1759,9 @@ def setup_parser():
     parser.add_argument('--tetra', dest='tetra', type=int, default=0, help='adds a test for tetramer freq dist before overlapping')
     parser.add_argument('--polish', dest='polish', type=int, default=0, help='whether to run contig polishing (not for scaffold mode)')
 
+    # for auto snake
+    parser.add_argument('--snake', dest='snake', type=str, default=None, help='path to snakemake config')
+
     # parser.add_argument('--min_len_ovl', dest='min_len_ovl', type=int, default=5000, help='add length filter before overlapping')
     # snakemake pipeline (& redotable)
     parser.add_argument('--ref', dest='ref', type=str, default="", help='reference used in quast evaluation and redotable')
