@@ -356,8 +356,7 @@ def launch_post_snake(configfile, run_name):
            f'-s ../code/snakesembly/snakesembly_post.smk ' \
            f'--profile lsf_short ' \
            f'--configfile {configfile} ' \
-           f'--config dumps={dumps} ' \
-           f'--config run_name={run_name} "'
+           f'--config dumps={dumps} run_name={run_name} "'
 
     print("\nlaunching snakemake post aeons\n")
     print(comm)
