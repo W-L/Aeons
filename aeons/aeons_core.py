@@ -1519,7 +1519,10 @@ class AeonsRun:
             print("breakpoint")
 
         # filter sequences with repeats at the end
-        reads_filtered = self.repeat_filter.filter_batch(seq_dict=reads_decision)
+        if self.args.filter_repeats:
+            reads_filtered = self.repeat_filter.filter_batch(seq_dict=reads_decision)
+        else:
+            reads_filtered = reads_decision
         # load new sequences, incl length filter
         sequences = SequencePool(sequences=reads_filtered, min_len=self.filt.min_seq_len)
         # add new sequences to AVA
@@ -1758,6 +1761,8 @@ def setup_parser():
     parser.add_argument('--hybrid', dest='hybrid', type=int, default=0, help='hybrid assembly, changes loading of prebuilt contigs')
     parser.add_argument('--tetra', dest='tetra', type=int, default=0, help='adds a test for tetramer freq dist before overlapping')
     parser.add_argument('--polish', dest='polish', type=int, default=0, help='whether to run contig polishing (not for scaffold mode)')
+    parser.add_argument('--filter_repeats', dest='filter_repeats', type=int, default=1, help='whether to run repeat filtering')
+
 
     # for auto snake
     parser.add_argument('--snake', dest='snake', type=str, default=None, help='path to snakemake config')
