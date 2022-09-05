@@ -36,11 +36,12 @@ class FastqStream:
 
     def read_batch(self):
         # get a batch of randomly sampled reads without mem mapping - 3rd generation in BR
-        read_lengths, read_sequences, total_bases = self._parallel_batches()
+        read_lengths, read_sequences, read_sources, total_bases = self._parallel_batches()
         # assign attributes with fetched data
         self.read_ids = set(read_sequences.keys())
         self.read_lengths = read_lengths
         self.read_sequences = read_sequences
+        self.read_sources = read_sources
         self.total_bases = total_bases
         self.batch += 1
         logging.info(f'got new batch of {len(read_sequences)} reads')
@@ -56,8 +57,8 @@ class FastqStream:
         # merge the output of all workers
         batches_concat = ''.join(batches)
         # parse the batch, which is just a long string into dicts
-        read_lengths, read_sequences, basesTOTAL = FastqStream.parse_batch(batch_string=batches_concat)
-        return read_lengths, read_sequences, basesTOTAL
+        read_lengths, read_sequences, read_sources, basesTOTAL = FastqStream.parse_batch(batch_string=batches_concat)
+        return read_lengths, read_sequences, read_sources, basesTOTAL
 
 
     @staticmethod
@@ -65,6 +66,7 @@ class FastqStream:
         # take a batch in string format and parse it into some containers. Imitates reading from an actual fq
         read_lengths = {}
         read_sequences = {}
+        read_sources = {}  # if fastq is speciallt formatted, grab the source
 
         batch_lines = batch_string.split('\n')
         n_lines = len(batch_lines)
@@ -73,16 +75,19 @@ class FastqStream:
         # since we increment i by 4 (lines for read in fq), loop until n_lines - 4
         while i < (n_lines - 4):
             # grab the name of the read. split on space, take first element, trim the @
-            name = str(batch_lines[i].split(' ')[0][1:])
+            desc = batch_lines[i].split(' ')
+            name = str(desc[0][1:])
+            source = str(desc[-1])
             seq = batch_lines[i + 1]
             read_len = len(seq)
             # update the containers
             read_lengths[name] = read_len
             read_sequences[name] = seq
+            read_sources[name] = source
             i += 4
         # get the total length of reads in this batch
         total_bases = np.sum(np.array(list(read_lengths.values())))
-        return read_lengths, read_sequences, total_bases
+        return read_lengths, read_sequences, read_sources, total_bases
 
 
     def _get_random_batch(self, fq, bsize, seed):
@@ -224,11 +229,12 @@ class FastqStream_mmap:
 
     def read_batch(self):
         # get a batch of randomly sampled reads without mem mapping - 3rd generation in BR
-        read_lengths, read_sequences, total_bases = self._get_batch()
+        read_lengths, read_sequences, read_sources, total_bases = self._get_batch()
         # assign attributes with fetched data
         self.read_ids = set(read_sequences.keys())
         self.read_lengths = read_lengths
         self.read_sequences = read_sequences
+        self.read_sources = read_sources
         self.total_bases = total_bases
         self.batch += 1
         logging.info(f'got new batch of {len(read_sequences)} reads')
@@ -288,7 +294,7 @@ class FastqStream_mmap:
             # add call to close memory map, only file itself is under with()
             mm.close()
 
-        if not batch.startswith('@'):
+        if not batch.startswith('@') and not batch.startswith('>'):
             logging.info("The batch is broken")
 
         if delete:
@@ -296,8 +302,8 @@ class FastqStream_mmap:
             new_offsets = np.delete(self.offsets, 0, 0)
             self.offsets = new_offsets
         # parse the batch, which is just a long string into dicts
-        read_lengths, read_sequences, basesTOTAL = FastqStream.parse_batch(batch_string=batch)
-        return read_lengths, read_sequences, basesTOTAL
+        read_lengths, read_sequences, read_sources, basesTOTAL = FastqStream.parse_batch(batch_string=batch)
+        return read_lengths, read_sequences, read_sources, basesTOTAL
 
 
 
@@ -318,5 +324,5 @@ class FastqStream_mmap:
         # this is to look into a batch without actually using it
         # this way we can have a first idea about the read length dist
         # in simulation runs before using any data
-        read_lengths, _, _ = self._get_batch(delete=False)
+        read_lengths, _, _, _= self._get_batch(delete=False)
         return read_lengths
