@@ -60,8 +60,8 @@ class LinearMapper:
         if truncate:
             sequences = {read_id: seq[:self.mu] for read_id, seq in sequences.items()}
 
-        unmapped_ids = 0
-        mapped_ids = 0
+        unmapped_count = 0
+        mapped_count = 0
         # loop over all sequences and map them one by one
         with TPE(max_workers=self.workers) as executor:
             results = executor.map(self.map_query, sequences.items())
@@ -71,9 +71,9 @@ class LinearMapper:
             # prevent appending an empty list if the read was not mapped
             if len(res) > 0:
                 batch_alignments.append(res)
-                mapped_ids += 1
+                mapped_count += 1
             else:
-                unmapped_ids += 1
+                unmapped_count += 1
 
         # transform to a single string
         alignments = '\n'.join(batch_alignments)
@@ -84,9 +84,9 @@ class LinearMapper:
 
         # counting the number of mapped and unmapped fragments
         if log:
-            logging.info(f"MAPPY: mapped queries: {mapped_ids}, unmapped queries: {unmapped_ids} ")
-        self.mapped_ids = mapped_ids
-        self.unmapped_ids = unmapped_ids
+            logging.info(f"MAPPY: mapped queries: {mapped_count}, unmapped queries: {unmapped_count} ")
+        self.mapped_count = mapped_count
+        self.unmapped_count = unmapped_count
         return alignments
 
 
