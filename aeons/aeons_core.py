@@ -813,6 +813,7 @@ class AeonsRun:
 
         # for plotting afterwards, we keep a list of rows
         self.metrics = defaultdict(list)
+        self.metrics_sep = defaultdict(list)
 
         # make sure the run name does not have any spaces
         assert ' ' not in args.name
@@ -1010,6 +1011,10 @@ class AeonsRun:
         accept_count = 0
         unmapped_count = 0
 
+        reject_ids = set()
+        accept_ids = set()
+        unmapped_ids = set()
+
         # loop over paf dictionary
         for record_id, record_list in paf_dict.items():
             # record_id, record_list = list(gaf_dict.items())[0]
@@ -1039,11 +1044,13 @@ class AeonsRun:
             if decision:
                 record_seq = read_sequences[rec.qname]
                 accept_count += 1
+                accept_ids.add(rec.qname)
 
             # REJECT
             else:
                 record_seq = read_sequences[rec.qname][: self.args.mu]
                 reject_count += 1
+                reject_ids.add(rec.qname)
 
             # append the read's sequence to a new dictionary of the batch after decision making
             reads_decision[rec.qname] = record_seq
@@ -1057,11 +1064,15 @@ class AeonsRun:
             else:
                 reads_decision[read_id] = seq
                 unmapped_count += 1
+                unmapped_ids.add(read_id)
 
         logging.info(f'decisions - rejecting: {reject_count} accepting: {accept_count} unmapped: {unmapped_count}')
         self.reject_count = reject_count
         self.accept_count = accept_count
         self.unmapped_count = unmapped_count
+        self.reject_ids = reject_ids
+        self.accept_ids = accept_ids
+        self.unmapped_ids = unmapped_ids
         return reads_decision
 
 
@@ -1152,23 +1163,23 @@ class AeonsRun:
         # save a few things after each batch
         # add it as row into a list that can be transformed to a pandas frame and saved for plotting
 
-        logging.info("total strat size")
-        strat_perc = []
-        strat_size = 0
-        fwd_acc = 0
-        rev_acc = 0
-        for cname, carray in self.strat.items():
-            csize = carray.shape[0]
-            strat_size += csize
-            fwd_acc += carray[:, 0].sum()
-            rev_acc += carray[:, 1].sum()
-            # for logging display
-            fwd = round(carray[:, 0].sum() / csize, 2)
-            rev = round(carray[:, 1].sum() / csize, 2)
-            avg = (fwd + rev) / 2
-            strat_perc.append((csize, avg))
-        strat_perc = sorted(strat_perc, key=lambda tup: tup[0])
-        # logging.info(f'{strat_perc}')
+        logging.info("saving metrics")
+        # strat_perc = []
+        # strat_size = 0
+        # fwd_acc = 0
+        # rev_acc = 0
+        # for cname, carray in self.strat.items():
+        #     csize = carray.shape[0]
+        #     strat_size += csize
+        #     fwd_acc += carray[:, 0].sum()
+        #     rev_acc += carray[:, 1].sum()
+        #     # for logging display
+        #     fwd = round(carray[:, 0].sum() / csize, 2)
+        #     rev = round(carray[:, 1].sum() / csize, 2)
+        #     avg = (fwd + rev) / 2
+        #     strat_perc.append((csize, avg))
+        # strat_perc = sorted(strat_perc, key=lambda tup: tup[0])
+        # # logging.info(f'{strat_perc}')
 
         # add new row to data frame of metrics
         bsize = len(self.stream.read_ids)
@@ -1177,16 +1188,16 @@ class AeonsRun:
                'batch': self.batch,
                'ncomp': self.graph.ncomp,
                'total_length': self.graph.total_length,
-               'acc_fwd_n': fwd_acc,
-               'acc_rev_n': rev_acc,
-               'acc_fwd_ratio': fwd_acc / strat_size,
-               'acc_rev_ratio': rev_acc / strat_size,
-               'n_mapped': self.mapped_ids / bsize,
-               'n_unmapped': self.unmapped_ids / bsize,
+               # 'acc_fwd_n': fwd_acc,
+               # 'acc_rev_n': rev_acc,
+               # 'acc_fwd_ratio': fwd_acc / strat_size,
+               # 'acc_rev_ratio': rev_acc / strat_size,
+               'n_mapped': self.mapped_count_lm / bsize,
+               'n_unmapped': self.unmapped_count_lm / bsize,
                'n_reject': self.reject_count / bsize,
                'n_accept': self.accept_count / bsize,
-               'n_unmapped_dec': self.unmapped_count / bsize,
-               'n_reads': len(self.stream.read_ids),
+               # 'n_unmapped_dec': self.unmapped_count / bsize,
+               # 'n_reads': len(self.stream.read_ids),
                'time_aeons': self.time_aeons,
                'time_naive': self.time_naive,
                'pool_size': len(self.pool.sequences.keys()),
@@ -1198,6 +1209,54 @@ class AeonsRun:
         # write to file
         df = pd.DataFrame(self.metrics)
         df_csv = f"{self.args.name}_metrics.csv"
+        with open(df_csv, 'w'):
+            pass
+        df.to_csv(df_csv)
+
+        # separate file separated by sources
+        source_counts = self.check_sources(read_sources=self.stream.read_sources)
+
+        stypes = ['acc', 'rej', 'unm']
+        for i in range(3):
+            scount = source_counts[i]
+            for name, count in scount.items():
+                row = {'name': self.args.name,
+                       'batch': self.batch,
+                       'ref': name,
+                       'count': count / bsize,
+                       'dec': stypes[i]}
+
+
+                self.metrics_sep = append_row(self.metrics_sep, row)
+            # for total counts across all sources
+            row = {'name': self.args.name,
+                   'batch': self.batch,
+                   'ref': 'total',
+                   'count': self.accept_count / bsize,
+                   'dec': 'acc'}
+
+            self.metrics_sep = append_row(self.metrics_sep, row)
+            # for total counts across all sources
+            row = {'name': self.args.name,
+                   'batch': self.batch,
+                   'ref': 'total',
+                   'count': self.reject_count / bsize,
+                   'dec': 'rej'}
+
+            self.metrics_sep = append_row(self.metrics_sep, row)
+            # for total counts across all sources
+            row = {'name': self.args.name,
+                   'batch': self.batch,
+                   'ref': 'total',
+                   'count': self.unmapped_count_lm / bsize,
+                   'dec': 'unm'}
+
+            self.metrics_sep = append_row(self.metrics_sep, row)
+
+
+        # write to file
+        df = pd.DataFrame(self.metrics_sep)
+        df_csv = f"{self.args.name}_metrics_sep.csv"
         with open(df_csv, 'w'):
             pass
         df.to_csv(df_csv)
@@ -1482,8 +1541,8 @@ class AeonsRun:
         lm = LinearMapper(ref=self.pool.contig_fa, mu=self.args.mu, default=False)
         paf_trunc = lm.mappy_batch(sequences=self.stream.read_sequences, truncate=True, out=f'{self.args.name}.lm_out.paf')
         # for metrics collection
-        self.mapped_ids = lm.mapped_ids
-        self.unmapped_ids = lm.unmapped_ids
+        self.mapped_count_lm = lm.mapped_count
+        self.unmapped_count_lm = lm.unmapped_count
 
         # make decisions
         # logging.info("making decisions")
@@ -1499,6 +1558,35 @@ class AeonsRun:
         if not os.path.exists(tmpdir):
             os.mkdir(tmpdir)
         execute(f'mv {self.name}.* {tmpdir}')
+
+
+    def check_sources(self, read_sources):
+        # check the sources of the accepted/rejected/unmapped reads
+
+        def fetch_sources(ids, source_dict):
+            sources = []
+            for name in ids:
+                try:
+                    source = source_dict[name]
+                except KeyError:
+                    source = 'na'
+                sources.append(source)
+            return sources
+
+        def summarise(sources):
+            sarr = np.array(sources)
+            s_unq, s_counts = np.unique(sarr, return_counts=True)
+            scounts = {}
+            for name, count in zip(s_unq, s_counts):
+                scounts[name] = count
+            return scounts
+
+        id_sets = [self.accept_ids, self.reject_ids, self.unmapped_ids]
+        res = []
+        for set_idx in range(3):
+            sources = fetch_sources(id_sets[set_idx], read_sources)
+            res.append(summarise(sources))
+        return res
 
 
     # @profile
