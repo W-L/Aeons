@@ -43,6 +43,7 @@ class PafLine:
         self.tprox = False
         # dummy inits
         self.maplen = None
+        self.min_length_pair = None
 
 
     def filter(self, filters):
@@ -53,6 +54,14 @@ class PafLine:
             return True
         if self.s1 < filters.min_s1:
             return True
+        if self.min_length_in_pair() < filters.min_seq_len:
+            return True
+
+
+    def min_length_in_pair(self):
+        if not self.min_length_pair:
+            self.min_length_pair = min(self.qlen, self.tlen)
+        return self.min_length_pair
 
 
     def overhang(self):
@@ -99,8 +108,7 @@ class PafLine:
             if self.internal_match_is_overlap():
                 c = 6  # class 6: needs trimming
 
-        # assign classification
-        self.c = c
+        return c
 
 
 
@@ -252,8 +260,8 @@ class PafLine:
 
 
     def internal_match_is_overlap(self):
-        # when the mess of untrimmed reads catches up,
-        # we need to reconsider internal matches that might actually be overlaps
+        # due to overlapping untrimmed reads,
+        # we reconsider internal matches that might be overlaps
         # if one record has a true dovetail, check if the other has a relaxed dovetail
         lim = 0.15
         if self._is_prox(start=self.qstart, end=self.qend, length=self.qlen):
