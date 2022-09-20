@@ -36,6 +36,8 @@ class PafLine:
             self.align_score = int(tags_parsed.get("AS", 0))
             self.cigar = tags_parsed.get("cg", None)
             self.s1 = tags_parsed.get("s1", 0)
+            prim = tags_parsed.get("tp", None)
+            self.primary = 1 if prim == 'P' else 0
             # self.dv = tags_parsed.get('dv', 0)
 
         # markers for trimming
@@ -461,6 +463,8 @@ class Paf:
             # FILTERING of PAF ENTRIES
             if paf.alignment_block_length < min_len:
                 continue
+            if not paf.primary:
+                continue
 
             paf_dict[str(paf.qname)].append(paf)
         return paf_dict
@@ -567,3 +571,12 @@ def conv_type(s, func):
         return s
 
 
+
+def choose_best_mapper(records):
+    # structured array to decide between ties, by using the score of the DP algorithm
+    mapq = [(record.mapq, record.align_score) for record in records]
+    custom_dtypes = [('q', int), ('dp', int)]
+    mapping_qualities = np.array(mapq, dtype=custom_dtypes)
+    sorted_qual = np.argsort(mapping_qualities, order=["q", "dp"])
+    record = [records[sorted_qual[-1]]]
+    return record
