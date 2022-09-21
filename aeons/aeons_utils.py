@@ -374,8 +374,8 @@ def get_dump_number(run_name):
 def launch_post_snake(configfile, run_name):
     # get number of dumps first
     dumps = get_dump_number(run_name)
-
-    comm = f'bsub -q short -M 4G -n 1 -o snake01.out -e snake01.err ' \
+    # snake00 logs reserved for this one, use 01 etc. for manual
+    comm = f'bsub -q short -M 4G -n 1 -o snake00.out -e snake00.err ' \
            f'"snakemake ' \
            f'-s ../code/snakesembly/snakesembly_post.smk ' \
            f'--profile lsf_short ' \
