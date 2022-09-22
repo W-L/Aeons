@@ -706,6 +706,10 @@ class GFAio:
         # split the lines
         # this makes sure that the unitigs are split
         # and that we can filter the link lines
+        # first check if there are any unitigs
+        if len(gfa) == 0:
+            return []
+
         if gfa.startswith('S\t'):
             gfat = gfa
         else:
