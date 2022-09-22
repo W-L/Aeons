@@ -387,7 +387,7 @@ class SequenceAVA:
 
 class Sequence:
 
-    def __init__(self, header, seq, cov=None, merged_components=None, merged_atoms=None):
+    def __init__(self, header, seq, cov=None, merged_components=None, merged_atoms=None, cap_l=False, cap_r=False):
         self.header = header
         self.seq = seq
 
@@ -411,7 +411,18 @@ class Sequence:
         # inits
         self.tetramer_zscores = 0
         self.kmers = 0
+        # temperature for ignoring reads
+        # if temperature reaches 0, reads gets frozen
+        self.temperature = 20
+        self.cap_l = cap_l
+        self.cap_r = cap_r
 
+
+
+    def check_temperature(self):
+        if self.temperature <= 0:
+            return 0
+        return 1
 
 
     def polish_sequence(self, read_sources):
@@ -775,6 +786,29 @@ class SequencePool:
         contained_ids = [s for (s, t) in containment.keys()]
         return contained_ids
 
+
+    def increase_temperature(self, sids):
+        # give active reads a boost in temperature
+        for s in sids:
+            try:
+                seqo = self.sequences[s]
+                seqo.temperature += 1
+            except KeyError:
+                pass
+
+
+    def decrease_temperature(self, lim):
+        # decrease the temperature of all reads by 1
+        # if a read is longer than lim, we never ignore it
+        frozen_seqs = set()
+        for header, seqo in self.sequences.items():
+            if len(seqo.seq) < lim:
+                seqo.temperature -= 1
+                hot = seqo.check_temperature()
+                if not hot:
+                    frozen_seqs.add(header)
+        logging.info(f"frozen seqs: {len(frozen_seqs)}")
+        return frozen_seqs
 
 
     def declare_contigs(self, min_contig_len):
