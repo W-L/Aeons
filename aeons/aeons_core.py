@@ -53,10 +53,10 @@ class Constants:
     def __init__(self):
         self.workers = 4                # so far used in fastqstream read retrieval
         self.mu = 450                   # initial bit of the read for decision making
-        self.node_size = 512            # length of a single node in the graph in bases
+        self.node_size = 128            # length of a single node in the graph in bases
         self.rho = 300
         self.alpha = 300
-        self.window = 1                 # whether strategies are written per base or downsized
+        # self.window = 1               # whether strategies are written per base or downsized
         self.wait = 60                  # waiting time in live version
         self.cov_wait = 2
 
@@ -418,7 +418,7 @@ class SparseGraph():
 
 
 
-    # @profile
+
     def approach_nodes(self, nodes, ccl):
         # check if it is possible to reach a desired node from any starting point
         # if it is, then the node goes into the accepted set
@@ -453,7 +453,7 @@ class SparseGraph():
 
 
 
-
+    # @profile
     def find_strat(self, desired_nodes):
         # reads from nodes close to desired ones will be accepted
         logging.info("finding new strategy")
@@ -500,7 +500,7 @@ class SparseGraph():
         return carrays
 
 
-
+    # @profile
     def process_graph(self, gfa, batch):
         # WRAPPER
         # load new graph and get component ends
@@ -888,10 +888,11 @@ class AeonsRun:
 
         # if this is a live run, initialise the sequencing device output
         if args.live:
-            fq, channels = LiveRun.init_live(device=args.device, host=args.host, port=args.port,
-                                                    quadrants=args.quadrant, run_name=args.name)
-            self.args.fq = fq
-            self.channels = channels
+            pass
+            # fq, channels = LiveRun.init_live(device=args.device, host=args.host, port=args.port,
+            #                                         quadrants=args.quadrant, run_name=args.name)
+            # self.args.fq = fq
+            # self.channels = channels
 
 
 
@@ -1034,9 +1035,9 @@ class AeonsRun:
             else:
                 continue
 
-            # index into strategy to find the decision
+            # index into strategy to find the decision  TODO this used to be in full size with unused division by self.args.window
             try:
-                decision = strat[str(rec.tname)][rec.c_start // self.args.window][rec.rev]
+                decision = strat[str(rec.tname)][rec.c_start // self.args.node_size][rec.rev]
             except TypeError:
                 # if we don't have a strategy yet, it's an integer so except this and accept all
                 decision = 1
@@ -1190,12 +1191,6 @@ class AeonsRun:
 
         row = {'name': self.args.name,
                'batch': self.batch,
-               'ncomp': self.graph.ncomp,
-               'total_length': self.graph.total_length,
-               # 'acc_fwd_n': fwd_acc,
-               # 'acc_rev_n': rev_acc,
-               # 'acc_fwd_ratio': fwd_acc / strat_size,
-               # 'acc_rev_ratio': rev_acc / strat_size,
                'n_mapped': self.mapped_count_lm / bsize,
                'n_unmapped': self.unmapped_count_lm / bsize,
                'n_reject': self.reject_count / bsize,
@@ -1204,8 +1199,7 @@ class AeonsRun:
                # 'n_reads': len(self.stream.read_ids),
                'time_aeons': self.time_aeons,
                'time_naive': self.time_naive,
-               'pool_size': len(self.pool.sequences.keys()),
-               'low_cov_nodes': self.graph.lowcov.shape[0]}
+               'pool_size': len(self.pool.sequences.keys())}
 
 
 
@@ -1368,7 +1362,7 @@ class AeonsRun:
 
 
 
-
+    # @profile
     def merge_overlaps(self, paf, gfa):
         self.ava.ava_dict2ava_file(paf_out=paf)
         # transform ava to gfa inorder to load as graph  # TODO could circumvent by transforming myself
@@ -1381,7 +1375,8 @@ class AeonsRun:
         GFAio.add_seqs_to_gfa(seqs=self.pool.sequences, gfa=gfa)
 
         # parse the AVA to form new sequences
-        new_paths, merged_headers, new_covs, used_rids = GFAio.get_linear_sequences(gfa=gfa, seq_pool=self.pool.sequences)
+        new_paths, merged_headers, new_covs, used_rids = GFAio.get_linear_sequences(
+            gfa=gfa, seq_pool=self.pool.sequences)
 
         # create sequence objects from new sequences
         new_sequences = {}
@@ -1529,7 +1524,7 @@ class AeonsRun:
         return next_update
 
 
-
+    # @profile
     def sim_batch(self):
         # start of batch processing when simulating
         # get new reads - real fastqs in live version
@@ -1543,7 +1538,9 @@ class AeonsRun:
         # initialise a new LinearMapper for the current contigs
         # logging.info("mapping new batch")
         lm = LinearMapper(ref=self.pool.contig_fa, mu=self.args.mu, default=False)
-        paf_trunc = lm.mappy_batch(sequences=self.stream.read_sequences, truncate=True, out=f'{self.args.name}.lm_out.paf')
+        paf_trunc = lm.mappy_batch(sequences=self.stream.read_sequences,
+                                   truncate=True,
+                                   out=f'{self.args.name}.lm_out.paf')
         # for metrics collection
         self.mapped_count_lm = lm.mapped_count
         self.unmapped_count_lm = lm.unmapped_count
@@ -1678,37 +1675,39 @@ class LiveRun:
         # initialise seq device dependent things
         # - find the output path where the fastq files are placed
         # - and where the channels toml is if we need that
-        try:
-            out_path = LiveRun._grab_output_dir(device=device, host=host, port=port)
-            logging.info(f"grabbing Minknow's output path: \n{out_path}\n")
-            fastq_dir = f'{out_path}/fastq_pass'
-        except:
-            logging.info("Minknow's output dir could not be inferred from device name. Exiting.")
-            logging.info(f'{device}\n{host}\n{port}')
-            # out_path = "/home/lukas/Desktop/BossRuns/playback_target/data/pb01/no_sample/20211021_2209_MS00000_f1_f320fce2"
-            # args.fq = out_path
-            exit()
+        pass
 
-        # grab channels of the condition - might be irrelevant if we don't have quadrants
-        if quadrants:
-            # out_path = "/nfs/research/goldman/lukasw/BR/data/zymo_all_live/20211124_boss_runs_log_live_001/20211124_1236_X2_FAQ09307_bfb985c5"
-            channel_path = f'{out_path}/channels.toml'
-            logging.info(f'looking for channels specification at : {channel_path}')
-            channels_found = False
-            while channels_found == False:
-                if not os.path.isfile(channel_path):
-                    logging.info("channels file does not exist (yet), waiting for 30s")
-                    time.sleep(30)
-                else:
-                    channels = LiveRun._grab_channels(channels_toml=channel_path, run_name=run_name)
-                    channels_found = True
-            # channels successfully found
-            logging.info(f"found channels specification: BOSS uses {len(channels)} channels.")
-        else:
-            # if we use a whole flowcell, use all channels
-            channels = set(np.arange(1, 512 + 1))
-
-        return fastq_dir, channels
+        # try:
+        #     out_path = LiveRun._grab_output_dir(device=device, host=host, port=port)
+        #     logging.info(f"grabbing Minknow's output path: \n{out_path}\n")
+        #     fastq_dir = f'{out_path}/fastq_pass'
+        # except:
+        #     logging.info("Minknow's output dir could not be inferred from device name. Exiting.")
+        #     logging.info(f'{device}\n{host}\n{port}')
+        #     # out_path = "/home/lukas/Desktop/BossRuns/playback_target/data/pb01/no_sample/20211021_2209_MS00000_f1_f320fce2"
+        #     # args.fq = out_path
+        #     exit()
+        #
+        # # grab channels of the condition - might be irrelevant if we don't have quadrants
+        # if quadrants:
+        #     # out_path = "/nfs/research/goldman/lukasw/BR/data/zymo_all_live/20211124_boss_runs_log_live_001/20211124_1236_X2_FAQ09307_bfb985c5"
+        #     channel_path = f'{out_path}/channels.toml'
+        #     logging.info(f'looking for channels specification at : {channel_path}')
+        #     channels_found = False
+        #     while channels_found == False:
+        #         if not os.path.isfile(channel_path):
+        #             logging.info("channels file does not exist (yet), waiting for 30s")
+        #             time.sleep(30)
+        #         else:
+        #             channels = LiveRun._grab_channels(channels_toml=channel_path, run_name=run_name)
+        #             channels_found = True
+        #     # channels successfully found
+        #     logging.info(f"found channels specification: BOSS uses {len(channels)} channels.")
+        # else:
+        #     # if we use a whole flowcell, use all channels
+        #     channels = set(np.arange(1, 512 + 1))
+        #
+        # return fastq_dir, channels
 
 
     @staticmethod
@@ -1854,19 +1853,13 @@ def setup_parser():
     parser.add_argument('--tetra', dest='tetra', type=int, default=0, help='adds a test for tetramer freq dist before overlapping')
     parser.add_argument('--polish', dest='polish', type=int, default=0, help='whether to run contig polishing (not for scaffold mode)')
     parser.add_argument('--filter_repeats', dest='filter_repeats', type=int, default=1, help='whether to run repeat filtering')
-
-
     # for auto snake
     parser.add_argument('--snake', dest='snake', type=str, default=None, help='path to snakemake config')
-
-    # parser.add_argument('--min_len_ovl', dest='min_len_ovl', type=int, default=5000, help='add length filter before overlapping')
     # snakemake pipeline (& redotable)
     parser.add_argument('--ref', dest='ref', type=str, default="", help='reference used in quast evaluation and redotable')
     # parser.add_argument('--snake', dest='snake', type=int, default=0, help='launch snakemake evaluation')
     # parser.add_argument('--gsize', dest='gsize', type=str, default="0", help='genome size estimate for assemblies')
     # parser.add_argument('--meta', dest='meta', type=int, default=0, help='metagenome snakemake pipe')
-
-
 
     # TODO for live version later
     parser.add_argument('--live', dest='live', type=int, default=0, help='flag to trigger live run')
