@@ -19,6 +19,11 @@ class SequenceAVA:
         self.filters = filters
         self.ava_dict = defaultdict(lambda: defaultdict(dict))  # 2 levels of defaultdict
         self.tetra = tetra    # whether to use the tetramer distance to filter overlaps
+        # container to keep overlaps
+        # save paf lines as qname-tname with alphanum sort
+        # TODO ultimately might replace the ava_dict
+        self.links = defaultdict(lambda: defaultdict(PafLine))
+        self.paf_links = f"{paf}.links.paf"
 
 
     def load_ava(self, paf):
@@ -87,6 +92,22 @@ class SequenceAVA:
             # unlink the outgoing edges
             self.ava_dict.pop(sid, None)
 
+
+    def remove_links(self, sequences):
+        # remove overlaps of certain sequences
+        for sid in sequences:
+            # targets for overlaps where sid is query
+            targets = self.links[sid].keys()
+            # remove the overlaps where sid is query
+            self.links.pop(sid, None)
+            # remove overlaps from targets
+            for t in targets:
+                self.links[t].pop(sid, None)
+
+    def remove_specific_link(self, s1, s2):
+        # just remove one specific link from the overlaps
+        self.links[s1].pop(s2, None)
+        self.links[s2].pop(s1, None)
 
 
     def to_be_trimmed(self):
@@ -250,7 +271,45 @@ class SequenceAVA:
                         written_lines.add(rec.line)
 
 
-    def aln2gfa(self, paf_in, gfa_out):
+    def ava2paf(self, paf_out):
+        # write all overlaps to a paf file
+        # different to method above: allows multiple links
+        written_lines = set()
+        with open(paf_out, 'w') as fh:
+            # indexing ava_dict returns node, dict for each end
+            for node, edge_dict in self.ava_dict.items():
+                for side, avas in edge_dict.items():
+                    # no overlaps on the end of this node
+                    if not avas:
+                        continue
+                    # grab next target - this requires that there is only 1 overlap
+                    for ava, rec in avas.items():
+                        # overlap was already written
+                        if rec.line in written_lines:
+                            continue
+                        else:
+                            fh.write(rec.line)
+                            written_lines.add(rec.line)
+
+
+    def links2paf(self, paf_out):
+        # write overlaps to paf file
+        written = set()
+        with open(paf_out, 'w') as fh:
+            for node, target_dict in self.links.items():
+                if not target_dict:
+                    continue
+                # go through all links
+                for target, rec in target_dict.items():
+                    if rec.line in written:
+                        continue
+                    else:
+                        fh.write(rec.line)
+                        written.add(rec.line)
+
+
+
+    def paf2gfa_fpa(self, paf_in, gfa_out):
         # transform to GFA file for further processing
         if not os.path.getsize(paf_in):
             logging.info("no overlaps for merging")
@@ -261,6 +320,29 @@ class SequenceAVA:
         if stderr:
             logging.info(f"stderr: \n {stderr}")
         return True
+
+
+    # def links2gfa(self):
+    #     TODO depr?
+        # self.links2paf(paf_out=self.paf0)
+        # self.paf2gfa_fpa(paf_in=self.paf0, gfa_out=self.gfa0)
+
+
+    def paf2gfa_gfatools(self, paf, fa, gfa=None):
+        # use gfatools to generate the graph and unitigs
+        if not os.path.getsize(paf):
+            logging.info("no overlaps for merging")
+            return False
+
+        comm = f"paf2gfa -i {fa} -u -c {paf}"
+        stdout, stderr = execute(comm)
+        # writing is not necessary if we use stdout of process
+        if gfa:
+            with open(gfa, 'w') as fh:
+                fh.write(stdout)
+        # if stderr:
+        #     logging.info(f"stderr: \n {stderr}")
+        return stdout
 
 
     @staticmethod
@@ -636,7 +718,7 @@ class SequencePool:
 
 
 
-    def increment(self, containment, overlaps=None, internals=None):
+    def increment(self, containment):
         # use the records of containment to increase the coverage counts & borders
         # containment = (contained, container) : rec
         edges = deepcopy(containment)
@@ -669,39 +751,6 @@ class SequencePool:
             for (source, target), rec in next_edges.items():
                 self.affect_increment(source, target, rec)
             previous_edges = next_edges
-
-
-        # TODO also use increments from overlaps between reads
-        # not sure we even want this to be honest
-        # if we only use true increments, we might capture more true positives
-        # simple for now, could incorporate some way of merging arrays
-        # other_inc = internals | overlaps
-        # for (query, target), rec in other_inc.items():
-        #     try:
-        #         qcov = np.copy(self.sequences[query].cov)
-        #         # qbor = self.borders[query]
-        #     except KeyError:
-        #         qcov = np.zeros(shape=rec.qlen, dtype='uint16')
-        #         # qbor = np.zeros(shape=rec.qlen, dtype='uint16')
-        #     qcov[rec.qstart: rec.qend] += 1
-        #     qcov[np.where(qcov > 100)] = 100
-        #     self.sequences[query].cov = qcov
-        #     # qbor[rec.qstart] += 1
-        #     # qbor[rec.qend - 1] += 1
-        #
-        #     try:
-        #         tcov = np.copy(self.sequences[target].cov)
-        #         # tbor = self.coverages[target]
-        #     except KeyError:
-        #         tcov = np.zeros(shape=rec.tlen, dtype='uint16')
-        #         # tbor = np.zeros(shape=rec.tlen, dtype='uint16')
-        #     tcov[rec.tstart: rec.tend] += 1
-        #     tcov[np.where(tcov > 100)] = 100
-        #     self.sequences[target].cov = tcov
-        #     # tbor[rec.tstart] += 1
-        #     # tbor[rec.tend - 1] += 1
-        #
-        #     # rec.plot()
 
         # for removal: return the ids of the contained sequences
         contained_ids = [s for (s, t) in containment.keys()]
@@ -780,13 +829,11 @@ class SequencePool:
     @staticmethod
     def contigs2gfa(gfa, contigs, node_size):
         # convert sequences to gfa with chunked up nodes
-        # verify files exist and are empty
+        # verify file exists and is empty
         empty_file(gfa)
-
         # init node counter
         node = 0
         n = node_size
-
         # check if there are any contigs
         if not contigs:
             return
@@ -857,3 +904,241 @@ class SequencePool:
         euc = euclidean_dist(s1, s2)
         return euc < euclidean_threshold
 
+
+class ContigPool(SequencePool):
+
+    """
+    a SequencePool specifically for contigs
+    - simply initialise as ContigPool(sequences=contigs)
+    - can do some additional things necessary for contigs
+    """
+
+    def process_contigs(self, node_size, lim, ccl, out_dir, write=False):
+        # WRAPPER
+        logging.info("finding new strategies.. ")
+        # chunk up contigs
+        logging.info("chunking contigs")
+        self._chunk_up_contigs(node_size=node_size)
+        # process ends and low cov regions
+        logging.info("processing ends")
+        self._process_contig_ends(node_size=node_size)
+        logging.info("processing low cov nodes")
+        self._process_low_cov_nodes(node_size=node_size, lim=lim)
+        # find and write new strategies
+        logging.info("finding strategies")
+        contig_strats = self._find_contig_strategies(node_size=node_size, ccl=ccl)
+        if write:
+            logging.info("writing new strategies")
+            self._write_contig_strategies(out_dir=out_dir)
+        return contig_strats
+
+
+    def _chunk_up_contigs(self, node_size):
+        # first thing to do for contigs
+        # for a collection of contigs, give them a chunked representation
+        n_comp = 0
+        lengths = []
+        for header, seqo in self.sequences.items():
+            seqo.chunk_up_coverage(n=node_size)
+            n_comp += 1
+            lengths.append(len(seqo.seq))
+        # report some info
+        lengths_sort = np.sort(lengths)[::-1]
+        logging.info(f'num components: {n_comp}')
+        logging.info(f'total comp length: {lengths_sort.sum()}')
+        logging.info(f'longest components: {lengths_sort[:10]}')
+
+
+    def _process_contig_ends(self, node_size):
+        # set contig ends so that they are picked up by the strategy
+        for header, seqo in self.sequences.items():
+            seqo.set_contig_ends(n=node_size)
+
+
+    def _process_low_cov_nodes(self, node_size, lim):
+        # find low coverage nodes that we want to target
+        unfilt = 0
+        filt = 0
+        for header, seqo in self.sequences.items():
+            n_unfilt, n_filt = seqo.find_low_cov(n=node_size, lim=lim)
+            unfilt += n_unfilt
+            filt += n_filt
+        logging.info(f'low coverage nodes: {unfilt}, after filtering: {filt}')
+
+
+    def _find_contig_strategies(self, node_size, ccl):
+        # find the boolean strategy for each contig
+        contig_strats = {}
+        for header, seqo in self.sequences.items():
+            cstrat = seqo.find_strat(ccl=ccl, n=node_size)
+            contig_strats[header] = cstrat
+        return contig_strats
+
+
+    def _write_contig_strategies(self, out_dir):
+        # write the strategies for all contigs to files
+        for header, seqo in self.sequences.items():
+            seqo.write_strat(self, out_dir=out_dir)
+
+
+
+
+
+
+class Unitig:
+
+    def __init__(self, sa_line_list, x_line):
+        # takes a list of lines from a gfa
+        # i.e. the S & A lines corresponding to a single unitig
+        self.name = random_id()
+        self._format_sa(sa_line_list)
+        self._format_x(x_line)
+        # dummy init
+        self.cov = None
+
+
+    def _format_x(self, x_line):
+        xl = x_line.split("\t")
+        assert xl[0].startswith('utg')
+        self.cap_l = True if int(xl[3]) > 0 else False
+        self.cap_r = True if int(xl[4]) > 0 else False
+
+
+
+    def _format_sa(self, line_list):
+        self._format_sline(sline=line_list[0])
+        self._format_atoms(alines=line_list[1:])
+
+
+    def _format_sline(self, sline):
+        sls = sline.split('\t')
+        self.seq = sls[1]
+        self.length = int(sls[2].split(':')[-1])
+        # self.n_atoms = int(sls[3].split(':')[-1])
+        assert sls[0].startswith('utg')
+        assert self.length == len(self.seq)
+
+
+    def _format_atoms(self, alines):
+        atoms = []
+        for line in alines:
+            assert line.startswith('A')
+            atom = {}
+            al = line.split('\t')
+            atom['pos'] = int(al[2])
+            atom['strand'] = al[3]
+            if atom['strand'] == '-':
+                atom['rev'] = 1
+            elif atom['strand'] == '+':
+                atom['rev'] = 0
+            else:
+                print(line)
+                print(al)
+                print(atom)
+                logging.info("wrong strand spec of unitig")
+                exit(1)
+            atom['name'] = al[4]
+            atoms.append(atom)
+        # loop a second time to get the ends
+        cpos = 0
+        for i in range(len(alines) - 1):
+            line = alines[i + 1]
+            al = line.split('\t')
+            pos = int(al[2])
+            to_add = pos - cpos
+            atoms[i]['n'] = to_add
+            cpos = pos
+        # mark last atom
+        atoms[-1]['n'] = -1
+
+        self.atoms = atoms
+        self.atom_headers = [a['name'] for a in atoms]
+
+
+    def to_seqo(self, seqpool):
+        # transform the unitig to sequence object
+        # this can only be done after merging coverage array
+        # check if that has been done
+        assert self.cov is not None
+        # grab atoms of atoms
+        merged_atoms = seqpool.get_atoms(headers=self.atom_headers)
+        merged_components = seqpool.get_components(headers=self.atom_headers)
+        seqo = Sequence(header=self.name, seq=self.seq, cov=self.cov,
+                        merged_components=merged_components, merged_atoms=merged_atoms,
+                        cap_l=self.cap_l, cap_r=self.cap_r)
+        return seqo
+
+
+
+class UnitigPool:
+
+    def __init__(self, unitigs):
+        self.unitigs = unitigs
+
+
+    def get_unitig_coverage_arrays(self, seqpool):
+        # for each of the unitigs, perform the cov array merging
+        for u in self.unitigs:
+            cm = CoverageMerger(u, seqpool)
+            cov_arr = cm.cov_arr
+            u.cov = cov_arr
+
+
+    def unitigs2seqpool(self, seqpool, min_seq_len):
+        # transform all unitigs to seq objects
+        # and get the read ids to remove
+        seqos = {}
+        used_sids = set()
+        for u in self.unitigs:
+            unitig_seqo = u.to_seqo(seqpool)
+            seqos[u.name] = unitig_seqo
+            used_sids.update(u.atom_headers)
+        # construct a new pool
+        new_pool = SequencePool(sequences=seqos, min_len=min_seq_len)
+        return new_pool, used_sids
+
+
+
+class CoverageMerger:
+
+    def __init__(self, unitig, seqpool):
+        # create the merged coverage array for a unitig
+        self.unitig = unitig
+        cov_arr = self._create_merged_arr(atoms=unitig.atoms, seqpool=seqpool)
+        assert unitig.length == cov_arr.shape[0]
+        self.cov_arr = cov_arr
+
+    def _create_merged_arr(self, atoms, seqpool):
+        arr_parts = []
+        cpos = 0
+        for a in atoms:
+            # a is a dictionary
+            assert a['pos'] >= cpos
+            name = a['name']
+            atom_arr = seqpool[name].cov.copy()
+            # TODO not sure if reverse first or trim first
+            atom_arr = atom_arr[::-1] if a['rev'] else atom_arr
+            if not a['n'] == -1:
+                atom_arr = atom_arr[: a['n']]  # TODO maybe + 1?
+            else:
+                # add last atom (goes until end of atom)
+                atom_arr = atom_arr
+            arr_parts.append(atom_arr)
+            cpos = a['pos']
+        return np.concatenate(arr_parts)
+
+
+
+def roll_boolean_array(arr, steps, direction):
+    assert arr.dtype == "bool"
+    # rolling direction is opposite of input
+    if direction == 0:
+        d = -1
+    elif direction == 1:
+        d = 1
+    else:
+        raise ValueError("direction must be in {0, 1}")
+    # roll array to spread truthy values
+    for i in range(steps):
+        arr += np.roll(arr, d)
+    return arr
