@@ -4,7 +4,7 @@ from .aeons_utils import execute, find_blocks_generic, random_id, empty_file,\
 from .aeons_sampler import FastqStream, FastqStream_mmap
 from .aeons_readlengthdist import ReadlengthDist
 from .aeons_merge import ArrayMerger
-from .aeons_paf import Paf
+from .aeons_paf import Paf, choose_best_mapper
 from .aeons_mapper import LinearMapper, ValidationMapping
 from .aeons_sequence import Sequence, SequencePool, SequenceAVA
 from .aeons_repeats import RepeatFilter
@@ -1018,7 +1018,11 @@ class AeonsRun:
         # loop over paf dictionary
         for record_id, record_list in paf_dict.items():
             # record_id, record_list = list(gaf_dict.items())[0]
-            rec = record_list[0]   # TODO make better decision here / use best mapping instead of random
+            if len(record_list) > 1:
+                # should not happen often since we filter secondary mappings
+                rec = choose_best_mapper(record_list)[0]
+            else:
+                rec = record_list[0]
 
             # find the start and end position relative to the whole linearised genome
             if rec.strand == '+':
