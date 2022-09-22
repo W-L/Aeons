@@ -27,53 +27,45 @@ class SequenceAVA:
         self.paf_links = f"{paf}.links.paf"
 
 
-    def load_ava(self, paf):
+    def load_ava(self, paf, seqpool):
         # load all entries from a paf file as PafLines
         # filter the entries while loading
-        skip = 0
         self.trims = []  # used for trimming
         self.overlaps = {}  # used for trimming
         containments = {}  # collect, used for coverage increments
         overlappers = set()  # used to track temperature of sequences
         ovl = 0
 
-        with open(paf, 'r') as fh:
-            for record in fh:
-                rec = PafLine(record)
-                # check if this mapping passes the filters
-                is_filtered = rec.filter(filters=self.filters)
-                if is_filtered:
-                    skip += 1
-                    continue
+        records, skip = Paf.parse_filter_classify_records(paf=paf, filters=self.filters)
 
-                # classify the alignment
-                rec.c = rec.classify()
+        for rec in records:
+            if rec.c == 2:
+                # first contained
+                containments[(rec.qname, rec.tname)] = rec
+            elif rec.c == 3:
+                # second contained
+                containments[(rec.tname, rec.qname)] = rec
+            elif rec.c in {4, 5}:
+                # if applicable, check for tetramer dist
+                if self.tetra:
+                    intra = seqpool.is_intra(rec.qname, rec.tname)
+                    if not intra:
+                        continue
 
-                if rec.c == 1:
-                    # internal match
-                    skip += 1
-                    continue
-                elif rec.c == 2:
-                    # first contained
-                    containments[(rec.qname, rec.tname)] = rec
-                elif rec.c == 3:
-                    # second contained
-                    containments[(rec.tname, rec.qname)] = rec
-                elif rec.c in {4, 5}:
-                    # append the alignment to both the query and the target
-                    ovl += 1
-                    self.ava_dict[rec.qname][rec.qside][(rec.tname, rec.tside)] = rec
-                    self.ava_dict[rec.tname][rec.tside][(rec.qname, rec.qside)] = rec
-                    self.overlaps[(rec.qname, rec.tname)] = rec
-                    # TODO new
-                    self.links[rec.qname][rec.tname] = rec
-                    self.links[rec.tname][rec.qname] = rec
-                    overlappers.add(rec.qname)
-                    overlappers.add(rec.tname)
-                elif rec.c == 6:
-                    self.trims.append(rec)
-                else:
-                    pass
+                # append the alignment to both the query and the target
+                ovl += 1
+                self.ava_dict[rec.qname][rec.qside][(rec.tname, rec.tside)] = rec
+                self.ava_dict[rec.tname][rec.tside][(rec.qname, rec.qside)] = rec
+                self.overlaps[(rec.qname, rec.tname)] = rec
+                # TODO new
+                self.links[rec.qname][rec.tname] = rec
+                self.links[rec.tname][rec.qname] = rec
+                overlappers.add(rec.qname)
+                overlappers.add(rec.tname)
+            elif rec.c == 6:
+                self.trims.append(rec)
+            else:
+                pass
 
         logging.info(f"ava load: skip {skip}, cont {len(containments.keys())} ovl: {ovl}")
         return containments, overlappers
@@ -232,8 +224,8 @@ class SequenceAVA:
                     avas = self.check_occupancy(avas=avas, occupied=occupied)
                     # if specified, check other filters
                     # e.g. tetramer freq. dist.
-                    if self.tetra:
-                        avas = self.check_tetramer_dist(avas=avas, seqpool=seqpool, node=node)
+                    # if self.tetra:
+                    #     avas = self.check_tetramer_dist(avas=avas, seqpool=seqpool, node=node)
                     # if there are no targets left
                     if not avas:
                         self.ava_dict[node][side] = {}
@@ -263,11 +255,12 @@ class SequenceAVA:
         return not_occ
 
 
-    def check_tetramer_dist(self, avas, seqpool, node):
-        # check whether an edge fulfills some tetramer dist metric
-        eligible = {(tname, tside): rec for (tname, tside), rec in avas.items()
-                    if seqpool.is_intra(node, tname)}
-        return eligible
+    # TODO depr
+    # def check_tetramer_dist(self, avas, seqpool, node):
+    #     # check whether an edge fulfills some tetramer dist metric
+    #     eligible = {(tname, tside): rec for (tname, tside), rec in avas.items()
+    #                 if seqpool.is_intra(node, tname)}
+    #     return eligible
 
 
     def ava_dict2ava_file(self, paf_out):
