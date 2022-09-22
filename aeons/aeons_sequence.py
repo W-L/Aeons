@@ -18,7 +18,6 @@ class SequenceAVA:
         self.gfa = f'{paf}.gfa'
         self.filters = filters
         self.ava_dict = defaultdict(lambda: defaultdict(dict))  # 2 levels of defaultdict
-        self.records = []
         self.tetra = tetra    # whether to use the tetramer distance to filter overlaps
 
 
@@ -26,10 +25,10 @@ class SequenceAVA:
         # load all entries from a paf file as PafLines
         # filter the entries while loading
         skip = 0
-        self.records = []  # used for trimming
-        self.overlaps = {}  # used for trimming, and increments
-        internals = {}  # used for trimming, and increments
-        containments = {}  # collect, used for coverage incrementing
+        self.trims = []  # used for trimming
+        self.overlaps = {}  # used for trimming
+        containments = {}  # collect, used for coverage increments
+        overlappers = set()  # used to track temperature of sequences
         ovl = 0
 
         with open(paf, 'r') as fh:
@@ -42,11 +41,11 @@ class SequenceAVA:
                     continue
 
                 # classify the alignment
-                rec.classify()
+                rec.c = rec.classify()
 
                 if rec.c == 1:
-                    # internal match, use to increment
-                    internals[(rec.qname, rec.tname)] = rec
+                    # internal match
+                    skip += 1
                     continue
                 elif rec.c == 2:
                     # first contained
@@ -56,18 +55,22 @@ class SequenceAVA:
                     containments[(rec.tname, rec.qname)] = rec
                 elif rec.c in {4, 5}:
                     # append the alignment to both the query and the target
+                    ovl += 1
                     self.ava_dict[rec.qname][rec.qside][(rec.tname, rec.tside)] = rec
                     self.ava_dict[rec.tname][rec.tside][(rec.qname, rec.qside)] = rec
-                    ovl += 1
                     self.overlaps[(rec.qname, rec.tname)] = rec
+                    # TODO new
+                    self.links[rec.qname][rec.tname] = rec
+                    self.links[rec.tname][rec.qname] = rec
+                    overlappers.add(rec.qname)
+                    overlappers.add(rec.tname)
+                elif rec.c == 6:
+                    self.trims.append(rec)
                 else:
                     pass
 
-                # keep the current records in a list
-                self.records.append(rec)
-
         logging.info(f"ava load: skip {skip}, cont {len(containments.keys())} ovl: {ovl}")
-        return containments, self.overlaps, internals
+        return containments, overlappers
 
 
 
