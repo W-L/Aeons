@@ -1302,30 +1302,30 @@ class AeonsRun:
 
 
                 self.metrics_sep = append_row(self.metrics_sep, row)
-            # for total counts across all sources
-            row = {'name': self.args.name,
-                   'batch': self.batch,
-                   'ref': 'total',
-                   'count': self.accept_count / bsize,
-                   'dec': 'acc'}
+        # for total counts across all sources
+        row = {'name': self.args.name,
+               'batch': self.batch,
+               'ref': 'total',
+               'count': self.accept_count / bsize,
+               'dec': 'acc'}
 
-            self.metrics_sep = append_row(self.metrics_sep, row)
-            # for total counts across all sources
-            row = {'name': self.args.name,
-                   'batch': self.batch,
-                   'ref': 'total',
-                   'count': self.reject_count / bsize,
-                   'dec': 'rej'}
+        self.metrics_sep = append_row(self.metrics_sep, row)
+        # for total counts across all sources
+        row = {'name': self.args.name,
+               'batch': self.batch,
+               'ref': 'total',
+               'count': self.reject_count / bsize,
+               'dec': 'rej'}
 
-            self.metrics_sep = append_row(self.metrics_sep, row)
-            # for total counts across all sources
-            row = {'name': self.args.name,
-                   'batch': self.batch,
-                   'ref': 'total',
-                   'count': self.unmapped_count_lm / bsize,
-                   'dec': 'unm'}
+        self.metrics_sep = append_row(self.metrics_sep, row)
+        # for total counts across all sources
+        row = {'name': self.args.name,
+               'batch': self.batch,
+               'ref': 'total',
+               'count': self.unmapped_count_lm / bsize,
+               'dec': 'unm'}
 
-            self.metrics_sep = append_row(self.metrics_sep, row)
+        self.metrics_sep = append_row(self.metrics_sep, row)
 
 
         # write to file
@@ -1640,30 +1640,21 @@ class AeonsRun:
 
     def check_sources(self, read_sources):
         # check the sources of the accepted/rejected/unmapped reads
-
         def fetch_sources(ids, source_dict):
-            sources = []
+            source_counts = defaultdict(int)
             for name in ids:
                 try:
                     source = source_dict[name]
                 except KeyError:
                     source = 'na'
-                sources.append(source)
-            return sources
-
-        def summarise(sources):
-            sarr = np.array(sources)
-            s_unq, s_counts = np.unique(sarr, return_counts=True)
-            scounts = {}
-            for name, count in zip(s_unq, s_counts):
-                scounts[name] = count
-            return scounts
+                source_counts[source] += 1
+            return source_counts
 
         id_sets = [self.accept_ids, self.reject_ids, self.unmapped_ids]
         res = []
         for set_idx in range(3):
             sources = fetch_sources(id_sets[set_idx], read_sources)
-            res.append(summarise(sources))
+            res.append(sources)
         return res
 
 
