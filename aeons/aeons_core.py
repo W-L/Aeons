@@ -1004,13 +1004,7 @@ class AeonsRun:
         containments, ovl = self.ava.load_ava(paf=paf)
         contained_ids = self.pool.increment(containment=containments)
         self.remove_seqs(sequences=contained_ids)
-
-        # after using coverage info, filter sequences before merging
-        # here we only remove from AVA, otherwise we can't map against the contigs
-        # short_seqs = {header for header, seqo in self.pool.sequences.items() if len(seqo.seq) < self.filt.min_len_ovl}
-        # if short_seqs:
-        #     self.ava.remove_from_ava(sequences=short_seqs)
-
+        self.pool.increase_temperature(ovl)
 
 
     def create_init_asm(self):
@@ -1528,13 +1522,10 @@ class AeonsRun:
             self.pool.increment(containment=cont_onto)
         cont = SequenceAVA.source_union(edges0=cont_new, edges1=cont_onto)
         self.remove_seqs(sequences=cont)
-        # TODO here
-        # after taking the coverage information, we can remove sequences that are too short
-        # to contribute to contigs from the pool. They won't be useful for anything else
-        # could also implement this earlier, i.e. in load_ava to prevent putting stuff into ava_dict
-        # which we then remove again here anyway. But then load_ava is already complex enough
-        # short_seqs = {header for header, seqo in sequences.sequences.items() if len(seqo.seq) < self.filt.min_len_ovl}
-        # self.remove_seqs(sequences=short_seqs)
+        # affect the overlappers
+        ovl = ovl_new | ovl_onto
+        self.pool.increase_temperature(ovl)
+
 
 
 
@@ -1550,6 +1541,7 @@ class AeonsRun:
         cont = SequenceAVA.source_union(edges0=pool_contained, edges1={})
         logging.info(f'removing {len(cont)} contained sequences from pool')
         self.remove_seqs(sequences=cont)
+        self.pool.increase_temperature(pool_ovl)
 
 
     def trim_sequences(self):
