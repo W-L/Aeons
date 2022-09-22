@@ -112,9 +112,9 @@ class SequenceAVA:
 
 
     def to_be_trimmed(self):
-        # after classification, identify which records need to be trimmed
+        # after classification use the records that need to be trimmed
         # and find the coordinates for trimming
-        trim = [rec for rec in self.records if rec.c == 6]
+        trim = self.trims
         # save the name and coordinates for trimming
         to_trim = {}
         for rec in trim:
