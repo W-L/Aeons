@@ -4,7 +4,8 @@ import numpy as np
 from collections import defaultdict
 
 from .aeons_mapper import LinearMapper
-from .aeons_utils import ascii_hist_values
+from .aeons_utils import ascii_hist_values, find_blocks_ge
+from .aeons_sequence import SequencePool
 
 
 class Repeat:
@@ -214,3 +215,181 @@ class RepeatFilter:
     def cluster_sequences(self):
         # TODO cluster together the repeats to decrease the library size
         pass
+
+
+
+
+class RepeatFilter2:
+    """
+    A class to:
+     - extract repeats
+     - generate a fasta
+     - map batches to repeat library for filtering
+
+    """
+
+    def __init__(self, name, seqpool):
+        self.seqpool = seqpool
+        self.name = name
+        self.library = f'{name}.repeat_lib.fa'
+        # initialise a mapper against the long reads
+        SequencePool.write_seq_dict(seqpool.seqdict(), f'{name}.seqs.fa')
+        lr_mapper = LinearMapper(ref=f'{name}.seqs.fa')
+        # chop and map all sequences
+        little_seqs = self.chop_seqs()
+        mappings = lr_mapper.mappy_batch(sequences=little_seqs)
+        # parse mappings
+        covs = self.count_cov(mappings)
+        # find the min cov for repeats
+        lim = self.find_limit(covs)
+        # find repeats
+        repeat_blocks = self.identify_repeat_sites(lim, covs)
+        # write to library file
+        self.repeats = self.write_repeat_seqs(repeat_blocks)
+
+
+    def chop_seqs(self, window=100, step=100):
+        # chop the current sequences into smaller bits
+        seqs = self.seqpool.seqdict()
+        little_seqs = {}
+        for header, seq in seqs.items():
+            i = 0
+            while i < len(seq):
+                little_seqs[f'{header}-{i:010}'] = seq[i: i + window]
+                i += step
+        with open('little_seqs.fa', 'w') as fh:
+            for header, seq in little_seqs.items():
+                fh.write(f'>{header}\n')
+                fh.write(f'{seq}\n')
+        return little_seqs
+
+
+
+    def count_cov(self, mappings):
+        # loop through mappings and count the coverage of all targets
+        covs = {}
+        for line in mappings.split('\n'):
+            rec = line.split('\t')
+            # check if target array exists
+            if not rec[5] in covs.keys():
+                covs[rec[5]] = np.zeros(shape=int(rec[6]))
+            # grab the cov
+            c = covs[rec[5]]
+            c[int(rec[7]): int(rec[8])] += 1
+        return covs
+
+
+    def find_limit(self, covs):
+        # find the max value first
+        maximum = 0
+        for c in covs.values():
+            cmax = np.max(c)
+            if cmax > maximum:
+                maximum = cmax
+
+        # count all coverage values
+        bcounts = np.zeros(int(np.max(maximum) + 1), dtype="int")
+        for c in covs.values():
+            c[0] = 0  # make sure count starts at 0
+            bcounts_arr = np.bincount(c.astype('int'))
+            for i in range(len(bcounts_arr)):
+                bcounts[i] += bcounts_arr[i]
+
+        # limit
+        lim = np.quantile(np.repeat(np.arange(len(bcounts)), repeats=bcounts), 0.999)
+        if lim < 3:
+            lim = 3
+
+        return lim
+
+
+    def identify_repeat_sites(self, lim, covs):
+        # find positions where repeat
+        repeat_blocks = {}
+        for header, cov in covs.items():
+            blocks = find_blocks_ge(cov, lim, min_len=100)
+            if len(blocks) > 0:
+                repeat_blocks[header] = blocks
+        return repeat_blocks
+
+
+    def write_repeat_seqs(self, repeat_blocks):
+        # write the repeat seqs to file
+        n_seqs = 0
+        repeats = {}
+        with open(self.library, 'w') as fh:
+            for header, blocks in repeat_blocks.items():
+                for start, end in blocks:
+                    r = Repeat2(header, start, end)
+                    r.get_sequence(seqpool=self.seqpool.sequences)
+                    fa = r.fasta()
+                    fh.write(fa)
+                    repeats[r.header] = r.seq
+                    n_seqs += 1
+        return repeats
+
+
+
+    def filter_batch(self, seq_dict):
+        # takes as input a dict of sequences
+        logging.info("repeat filtering batch of reads")
+        # write batch to file
+        bfile = f'{self.name}.batch.fa'
+        with open(bfile, 'w') as fh:
+            for header, seq in seq_dict.items():
+                fa = f'>{header}\n{seq}\n'
+                fh.write(fa)
+
+        # initialise a LinearMapper object
+        lm = LinearMapper(ref=bfile)
+        # first map them to the library
+        mappings = lm.mappy_batch(self.repeats)
+        rep_cov = self.count_cov(mappings)
+        danger_ids = self.check_coverage(rep_cov)
+        return danger_ids
+
+
+
+
+    def check_coverage(self, rep_cov, window=500):
+        # check whether a read has a repeat on either end
+        danger = set()
+        for header, rcov in rep_cov.items():
+            beginning = rcov[: window]
+            if np.sum(beginning) > 5:
+                danger.add(header)
+            ending = rcov[window: ]
+            if np.sum(ending) > 5:
+                danger.add(header)
+        return danger
+
+
+
+
+class Repeat2:
+
+    def __init__(self, rid=None, start=0, end=-1):
+        self.rid = rid
+        self.start = start
+        self.end = end
+        self.seq = ''
+
+
+    def get_sequence(self, seqpool):
+        # index into seqpool and trim
+        self.seq = seqpool[self.rid].seq[self.start: self.end]
+
+
+    def fasta(self):
+        if not self.seq:
+            return ""
+        # construct fasta entry
+        self.header = f'{self.rid}-{self.start}:{self.end}'
+        fa = f'>{self.header}\n{self.seq}\n'
+        return fa
+
+
+
+
+
+
