@@ -482,6 +482,73 @@ class Sequence:
         return 1
 
 
+    def chunk_up_coverage(self, n):
+        # for generating strategies, we need to chunk the coverage
+        cov = self.cov
+        self.cov_chunked = np.array([np.sum(cov[i: i + n]) for i in range(0, len(cov), n)])
+        # init an empty array to record nodes of interest
+        self.noi = np.zeros(shape=self.cov_chunked.shape[0], dtype="bool")
+
+
+
+    def set_contig_ends(self, n, lim=50):
+        cc = self.cov_chunked
+        if cc[0] > lim * n:
+            pass
+        elif self.cap_l:
+            pass
+        # only set as interesting if every check fails
+        else:
+            self.noi[0] = 1
+
+        if cc[-1] > lim * n:
+            pass
+        elif self.cap_r:
+            pass
+        else:
+            self.noi[-1] = 1
+
+
+    def find_low_cov(self, n, lim):
+        # find where the coverage is too low
+        cc = self.cov_chunked
+        lc = np.where(cc < lim * n)[0]
+        # filter single windows of low coverage
+        # using the difference between adjacent indices of lowcov windows
+        # EXCLUDING blocks of coverage 1
+        lc_diff = np.diff(lc)
+        lc_blocks = find_blocks_generic(lc_diff, 1, 3)
+        lc_filt = set()
+        for start, end in lc_blocks:
+            lc_filt.update(lc[start: end + 1])
+        lc_arr = np.array(list(lc_filt), dtype="int")
+        n_unfilt = lc.shape[0]
+        n_filt = lc_arr.shape[0]
+        # multi-index to set the nois
+        self.noi[lc_arr] = 1
+        return n_unfilt, n_filt
+
+
+    def find_strat(self, ccl, n):
+        # cover X% of ccl
+        n_steps = int(ccl[-3] / n)
+        # spread the nodes of interest in both directions to get final binary arr
+        fwd = roll_boolean_array(arr=self.noi.copy(), steps=n_steps, direction=0)
+        rev = roll_boolean_array(arr=self.noi.copy(), steps=n_steps, direction=1)
+        self.strat = np.column_stack((fwd, rev))
+        return self.strat
+
+
+    def write_strat(self, out_dir):
+        # write new strategy for readfish
+        # and place marker file to tell readfish to reload
+        cpath = f'{out_dir}/masks/{self.header}'
+        np.save(cpath, self.strat)
+        # place a marker that the strategies were updated
+        markerfile = f'{out_dir}/masks/masks.updated'
+        Path(markerfile).touch()
+        # TODO to load ? check readfish code
+        # t = np.load(f'{self.const.name}.strat.npy', allow_pickle=True)[()]
 
 
 
