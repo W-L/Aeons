@@ -6,8 +6,8 @@ from .aeons_readlengthdist import ReadlengthDist
 from .aeons_merge import ArrayMerger
 from .aeons_paf import Paf, choose_best_mapper
 from .aeons_mapper import LinearMapper, ValidationMapping
-from .aeons_sequence import Sequence, SequencePool, SequenceAVA
-from .aeons_repeats import RepeatFilter
+from .aeons_sequence import Sequence, SequencePool, SequenceAVA, Unitig, UnitigPool, ContigPool
+from .aeons_repeats import RepeatFilter, RepeatFilter2
 
 
 # STANDARD LIBRARY
@@ -467,7 +467,7 @@ class SparseGraph():
         # create strategy arrays
         cnames = set(list(self.node_sources.values()))
         # create a boolean array for each contig
-        carrays = {cname: np.zeros((int(contig_lengths[cname] / self.args.window), 2),
+        carrays = {cname: np.zeros((contig_lengths[cname], 2),
                                    dtype="bool") for cname in cnames}
 
         # mark the accepted transitions as accepted in the boolean array
@@ -671,6 +671,7 @@ class GFAio:
 
     @staticmethod
     def add_seqs_to_gfa(gfa, seqs):
+        # TODO depr?
         # fill a gfa that has * with sequences
         gfa_seq = open(f'{gfa}.tmp', 'w')
 
@@ -696,6 +697,37 @@ class GFAio:
                     gfa_seq.write(line)
         gfa_seq.close()
         execute(f"mv {gfa}.tmp {gfa}")
+
+
+    @staticmethod
+    def load_unitigs(gfa):
+        # load unitigs after graph cleaning with gfatools
+        # read either a gfa file or a string
+        # split the lines
+        # this makes sure that the unitigs are split
+        # and that we can filter the link lines
+        if gfa.startswith('S\t'):
+            gfat = gfa
+        else:
+            with open(gfa, 'r') as fh:
+                gfat = fh.read()
+        # string operations
+        gfatt = gfat.split('\nS\t')
+        # first and last need extra treatment
+        gfatt[0] = gfatt[0][2:]  # skip the first "S\t"
+        gfatt[-1] = gfatt[-1].replace('\nx', '\nL').split('\nL')[0]  # exclude all L and x lines
+
+        # get the x lines
+        gfax = gfat.split('\nx\t')[1:]
+        # make sure we have the same number of S_A lines and x lines
+        assert len(gfatt) == len(gfax)
+
+        # parse into unitig objects
+        unitigs = []
+        for sa_lines, x_line in zip(gfatt, gfax):
+            unitigs.append(Unitig(sa_lines.split('\n'), x_line))
+        return unitigs
+
 
 
     @staticmethod
@@ -884,7 +916,8 @@ class AeonsRun:
 
         # create first asm
         # makes contigs, saves graph, loads adj, finds comp ends
-        self.create_init_asm()
+        # self.create_init_asm()
+        self.assemble_add_and_filter_contigs()
 
         # if this is a live run, initialise the sequencing device output
         if args.live:
@@ -967,10 +1000,9 @@ class AeonsRun:
         # write out the current readpool & run complete all versus all
         logging.info("running first AVA")
         paf = self.pool.run_ava(sequences=self.pool.seqdict(), fa=self.pool.fa, paf=self.pool.ava)
-
         # load paf into ava object - includes filtering
-        containments, overlaps, internals = self.ava.load_ava(paf=paf)
-        contained_ids = self.pool.increment(containment=containments) # , overlaps=overlaps, internals=internals)
+        containments, ovl = self.ava.load_ava(paf=paf)
+        contained_ids = self.pool.increment(containment=containments)
         self.remove_seqs(sequences=contained_ids)
 
         # after using coverage info, filter sequences before merging
@@ -991,6 +1023,50 @@ class AeonsRun:
         # write the current pool to file for mapping against
         contigs = self.pool.declare_contigs(min_contig_len=self.filt.min_contig_len)
         self.pool.write_seq_dict(seq_dict=contigs.seqdict(), file=self.pool.contig_fa)
+
+
+
+
+    def assemble_unitigs(self):
+        # WRAPPER
+        # - write current links and pool sequences
+        # - transform to gfa, do some cleaning and merge unitigs
+        # - parse unitigs & coverage arrays
+        # - transform unitigs to sequence pool and remove used sequences
+        # write current links to paf
+        self.ava.links2paf(paf_out=self.ava.paf_links)
+        # write pool to file
+        SequencePool.write_seq_dict(seq_dict=self.pool.seqdict(), file=self.pool.fa)
+        # create gfa and unitigs
+        gfa = self.ava.paf2gfa_gfatools(paf=self.ava.paf_links, fa=self.pool.fa)
+        # load the new unitigs
+        unitigs = GFAio.load_unitigs(gfa=gfa)
+        # put them into a collection
+        unitig_pool = UnitigPool(unitigs)
+        # get the coverage arrays
+        unitig_pool.get_unitig_coverage_arrays(seqpool=self.pool.sequences)
+        # transform into a sequence pool
+        new_pool, used_sids = unitig_pool.unitigs2seqpool(
+            seqpool=self.pool, min_seq_len=self.filt.min_seq_len)
+        self.remove_seqs(used_sids)
+        return new_pool
+
+
+    def assemble_add_and_filter_contigs(self):
+        # WRAPPER
+        # - assemble the current graph and extract new unitigs
+        # - add them to the seqpool
+        # - extract the large contigs for mapping against
+        logging.info("assembling new unitigs.. ")
+        new_pool = self.assemble_unitigs()
+        # add new sequences to the dict and to the ava
+        logging.info("loading and overlapping new unitigs.. ")
+        self.add_new_sequences(sequences=new_pool, increment=False)
+        # write the current pool to file for mapping against
+        logging.info("finding contigs to map against.. ")
+        contigs = self.pool.declare_contigs(min_contig_len=self.filt.min_contig_len)
+        SequencePool.write_seq_dict(seq_dict=contigs.seqdict(), file=self.pool.contig_fa)
+        return contigs
 
 
 
@@ -1366,7 +1442,7 @@ class AeonsRun:
     def merge_overlaps(self, paf, gfa):
         self.ava.ava_dict2ava_file(paf_out=paf)
         # transform ava to gfa inorder to load as graph  # TODO could circumvent by transforming myself
-        new_ovls = self.ava.aln2gfa(paf_in=paf, gfa_out=gfa)
+        new_ovls = self.ava.paf2gfa_fpa(paf_in=paf, gfa_out=gfa)
 
         if not new_ovls:
             return SequencePool()
@@ -1430,6 +1506,7 @@ class AeonsRun:
             return
 
         self.ava.remove_from_ava(sequences=sequences)
+        self.ava.remove_links(sequences=sequences)
         self.pool.remove_sequences(sequences=sequences)
 
 
@@ -1443,12 +1520,12 @@ class AeonsRun:
         # ingest the new sequences
         self.pool.ingest(seqs=sequences)
         # load new alignments
-        cont_new, ovl_new, int_new = self.ava.load_ava(ava_new)
+        cont_new, ovl_new = self.ava.load_ava(ava_new)
         if increment:
-            self.pool.increment(containment=cont_new, overlaps=ovl_new, internals=int_new)
-        cont_onto, ovl_onto, int_onto = self.ava.load_ava(ava_onto_pool)
+            self.pool.increment(containment=cont_new)
+        cont_onto, ovl_onto = self.ava.load_ava(ava_onto_pool)
         if increment:
-            self.pool.increment(containment=cont_onto, overlaps=ovl_onto, internals=int_onto)
+            self.pool.increment(containment=cont_onto)
         cont = SequenceAVA.source_union(edges0=cont_new, edges1=cont_onto)
         self.remove_seqs(sequences=cont)
         # TODO here
@@ -1469,7 +1546,7 @@ class AeonsRun:
         logging.info("ava pool")
         contigs = self.pool.declare_contigs(min_contig_len=self.filt.min_contig_len)
         pool_paf = self.pool.run_ava(sequences=contigs.seqdict(), fa=self.pool.fa, paf=self.pool.ava)
-        pool_contained, _, _ = self.ava.load_ava(paf=pool_paf)
+        pool_contained, pool_ovl = self.ava.load_ava(paf=pool_paf)
         cont = SequenceAVA.source_union(edges0=pool_contained, edges1={})
         logging.info(f'removing {len(cont)} contained sequences from pool')
         self.remove_seqs(sequences=cont)
@@ -1491,7 +1568,7 @@ class AeonsRun:
         trim_paf = self.pool.run_ava(sequences=trimmed_seqs,
                                      fa=f'{self.pool.fa}.trim',
                                      paf=f'{self.pool.ava}.trim')
-        trim_contained, _, _ = self.ava.load_ava(paf=trim_paf)
+        trim_contained, _ = self.ava.load_ava(paf=trim_paf)
         to_remove = self.ava.trim_success(trim_dict=trim_dict, overlaps=self.ava.overlaps)
         # remove original sequences & failed mergers
         self.remove_seqs(sequences=to_remove)
@@ -1621,12 +1698,17 @@ class AeonsRun:
         # trim sequences that might lead to overlaps
         self.trim_sequences()
 
-        # process current alignments
-        self.ava.single_links(seqpool=self.pool)
-        new_sequences = self.merge_overlaps(paf=f'{self.ava.paf}.deg', gfa=self.ava.gfa)
-        self.add_new_sequences(sequences=new_sequences, increment=False)
+        # process current alignments  - TODO depr?
+        # self.ava.single_links(seqpool=self.pool)
+        # new_sequences = self.merge_overlaps(paf=f'{self.ava.paf}.deg', gfa=self.ava.gfa)
+        # self.add_new_sequences(sequences=new_sequences, increment=False)
+        # contigs = self.pool.declare_contigs(min_contig_len=self.filt.min_contig_len)
 
-        contigs = self.pool.declare_contigs(min_contig_len=self.filt.min_contig_len)
+        # call wrapper to update assembly
+        contigs = self.assemble_add_and_filter_contigs()
+        contig_pool = ContigPool(sequences=contigs.sequences)
+
+
         if self.args.polish:
             cpolished = self.pool.polish_sequences(contigs=contigs, read_sources=self.read_sources)
             contigs = self.pool.declare_contigs(min_contig_len=self.filt.min_contig_len)
@@ -1635,12 +1717,31 @@ class AeonsRun:
         # write the current pool to file for mapping against
         self.pool.write_seq_dict(seq_dict=contigs.seqdict(), file=self.pool.contig_fa)
 
-        # transform to generalised gfa file
-        node_sources, node_positions = self.pool.contigs2gfa(gfa=self.pool.gfa, contigs=contigs, node_size=self.args.node_size)
-        # wrapper for graph processing to get new strategy
-        self.graph = SparseGraph(args=self.args, approx_ccl=self.rl_dist.approx_ccl, node_sources=node_sources, node_positions=node_positions)
-        # find new strategy
-        self.strat = self.graph.process_graph(gfa=self.pool.gfa, batch=self.batch)
+        # transform to generalised gfa file  # TODO replace this with something simpler
+        # node_sources, node_positions = self.pool.contigs2gfa(
+        #     gfa=self.pool.gfa, contigs=contigs, node_size=self.args.node_size)
+
+
+        # wrapper for graph processing to get new strategy  # TODO replace depr?
+        # self.graph = SparseGraph(
+        #     args=self.args,
+        #     approx_ccl=self.rl_dist.approx_ccl,
+        #     node_sources=node_sources,
+        #     node_positions=node_positions)
+        # find new strategy  # TODO replace depr?
+        # self.strat = self.graph.process_graph(gfa=self.pool.gfa, batch=self.batch)
+
+
+        # check if we have any frozen sequences
+        frozen_ids = self.pool.decrease_temperature(lim=self.filt.min_contig_len)
+        self.remove_seqs(sequences=frozen_ids)
+
+        self.strat = contig_pool.process_contigs(
+            node_size=self.args.node_size,
+            lim=self.args.lowcov,
+            ccl=self.rl_dist.approx_ccl,
+            out_dir=self.args.out_dir)
+
 
         # self.strat_csv(self.strat, node2pos)  # this is for bandage viz
 
