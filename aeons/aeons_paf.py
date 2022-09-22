@@ -471,6 +471,33 @@ class Paf:
 
 
     @staticmethod
+    def parse_filter_classify_records(paf, filters):
+        # parse a paf file by converting each line to Paf object
+        # filtering and classifying mappings
+        records = []
+        skip = 0
+        with open(paf, 'r') as fh:
+            for record in fh:
+                rec = PafLine(record)
+                # check if this mapping passes the filters
+                is_filtered = rec.filter(filters=filters)
+                if is_filtered:
+                    skip += 1
+                    continue
+
+                # classify the alignment
+                rec.c = rec.classify()
+
+                if rec.c == 1:
+                    # internal match
+                    skip += 1
+                    continue
+                # if not filtered or skipped
+                records.append(rec)
+        return records, skip
+
+
+    @staticmethod
     def plot_pafdict(paf_dict, out):
         import plotnine as p9
         import pandas as pd
