@@ -854,12 +854,12 @@ class SequencePool:
         return contained_ids
 
 
-    def increase_temperature(self, sids):
+    def reset_temperature(self, sids):
         # give active reads a boost in temperature
         for s in sids:
             try:
                 seqo = self.sequences[s]
-                seqo.temperature += 1
+                seqo.temperature = 20
             except KeyError:
                 pass
 

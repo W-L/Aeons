@@ -1008,7 +1008,7 @@ class AeonsRun:
         containments, ovl = self.ava.load_ava(paf=paf)
         contained_ids = self.pool.increment(containment=containments)
         self.remove_seqs(sequences=contained_ids)
-        self.pool.increase_temperature(ovl)
+        self.pool.reset_temperature(ovl)
 
 
     def create_init_asm(self):
@@ -1528,7 +1528,7 @@ class AeonsRun:
         self.remove_seqs(sequences=cont)
         # affect the overlappers
         ovl = ovl_new | ovl_onto
-        self.pool.increase_temperature(ovl)
+        self.pool.reset_temperature(ovl)
 
 
 
@@ -1545,7 +1545,7 @@ class AeonsRun:
         cont = SequenceAVA.source_union(edges0=pool_contained, edges1={})
         logging.info(f'removing {len(cont)} contained sequences from pool')
         self.remove_seqs(sequences=cont)
-        self.pool.increase_temperature(pool_ovl)
+        self.pool.reset_temperature(pool_ovl)
 
 
     def trim_sequences(self):
