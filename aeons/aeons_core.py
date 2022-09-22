@@ -1005,7 +1005,7 @@ class AeonsRun:
         logging.info("running first AVA")
         paf = self.pool.run_ava(sequences=self.pool.seqdict(), fa=self.pool.fa, paf=self.pool.ava)
         # load paf into ava object - includes filtering
-        containments, ovl = self.ava.load_ava(paf=paf)
+        containments, ovl = self.ava.load_ava(paf=paf, seqpool=self.pool)
         contained_ids = self.pool.increment(containment=containments)
         self.remove_seqs(sequences=contained_ids)
         self.pool.reset_temperature(ovl)
@@ -1518,10 +1518,10 @@ class AeonsRun:
         # ingest the new sequences
         self.pool.ingest(seqs=sequences)
         # load new alignments
-        cont_new, ovl_new = self.ava.load_ava(ava_new)
+        cont_new, ovl_new = self.ava.load_ava(ava_new, seqpool=self.pool)
         if increment:
             self.pool.increment(containment=cont_new)
-        cont_onto, ovl_onto = self.ava.load_ava(ava_onto_pool)
+        cont_onto, ovl_onto = self.ava.load_ava(ava_onto_pool, seqpool=self.pool)
         if increment:
             self.pool.increment(containment=cont_onto)
         cont = SequenceAVA.source_union(edges0=cont_new, edges1=cont_onto)
@@ -1541,7 +1541,7 @@ class AeonsRun:
         logging.info("ava pool")
         contigs = self.pool.declare_contigs(min_contig_len=self.filt.min_contig_len)
         pool_paf = self.pool.run_ava(sequences=contigs.seqdict(), fa=self.pool.fa, paf=self.pool.ava)
-        pool_contained, pool_ovl = self.ava.load_ava(paf=pool_paf)
+        pool_contained, pool_ovl = self.ava.load_ava(paf=pool_paf, seqpool=self.pool)
         cont = SequenceAVA.source_union(edges0=pool_contained, edges1={})
         logging.info(f'removing {len(cont)} contained sequences from pool')
         self.remove_seqs(sequences=cont)
@@ -1564,7 +1564,7 @@ class AeonsRun:
         trim_paf = self.pool.run_ava(sequences=trimmed_seqs,
                                      fa=f'{self.pool.fa}.trim',
                                      paf=f'{self.pool.ava}.trim')
-        trim_contained, _ = self.ava.load_ava(paf=trim_paf)
+        trim_contained, _ = self.ava.load_ava(paf=trim_paf, seqpool=self.pool)
         to_remove = self.ava.trim_success(trim_dict=trim_dict, overlaps=self.ava.overlaps)
         # remove original sequences & failed mergers
         self.remove_seqs(sequences=to_remove)
