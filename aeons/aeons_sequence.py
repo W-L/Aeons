@@ -6,7 +6,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .aeons_paf import PafLine
+from .aeons_paf import PafLine, Paf
 from .aeons_utils import execute, find_exe, write_logs, empty_file, random_id, find_blocks_generic
 from .aeons_polisher import Polisher
 from .aeons_kmer import euclidean_dist, euclidean_threshold
@@ -404,10 +404,10 @@ class Sequence:
         self.polish_step = 5
         # inits
         self.tetramer_zscores = 0
-        self.kmers = 0
+        # self.kmers = 0
         # temperature for ignoring reads
         # if temperature reaches 0, reads gets frozen
-        self.temperature = 20
+        self.temperature = 30
         self.cap_l = cap_l
         self.cap_r = cap_r
 
@@ -549,7 +549,7 @@ class Sequence:
 
 class SequencePool:
 
-    def __init__(self, sequences=None, name="dummy", min_len=3000, out_dir="dummy", threads=48):
+    def __init__(self, sequences=None, name="dummy", min_len=3000, out_dir="dummy", threads=12, exe=None):
         # a unified pool for reads and contigs with persistent AVA
         self.min_len = min_len
         self.out_dir = out_dir
@@ -575,7 +575,7 @@ class SequencePool:
         self.gfa = f'{name}.gfa'
 
         # executables
-        self.exe_mm2 = None
+        self.exe_mm2 = exe
 
 
 
@@ -654,8 +654,13 @@ class SequencePool:
         comm = f'{self.exe_mm2} -x ava-ont -t{self.threads} {fa} {fa} >{paf}'
         if base_level:
             comm = f'{self.exe_mm2} -cx ava-ont -t{self.threads} {fa} {fa} >{paf}'
+        import time
+        tic = time.time()
         stdout, stderr = execute(comm)
-        write_logs(stdout, stderr, f'{self.out_dir}/logs/ava')
+        toc = time.time()
+        logging.info(f"timing: {toc - tic}")
+        if os.path.exists(f'{self.out_dir}/logs'):
+            write_logs(stdout, stderr, f'{self.out_dir}/logs/ava')
         return paf
 
 
@@ -694,7 +699,7 @@ class SequencePool:
         stdout, stderr = execute(comm)
         write_logs(stdout, stderr, f'{self.out_dir}/logs/ava_add')
         # mapping new sequences to previous pool
-        comm = f'{self.exe_mm2} -x map-ont -t{self.threads} {self.fa} {new_fa} >{new_onto_pool}'
+        comm = f'{self.exe_mm2} -x map-ont --dual=yes -t{self.threads} {self.fa} {new_fa} >{new_onto_pool}'
         stdout, stderr = execute(comm)
         write_logs(stdout, stderr, f'{self.out_dir}/logs/map2pool')
         # return filenames to be ingested as AVA
@@ -848,12 +853,12 @@ class SequencePool:
         return contained_ids
 
 
-    def reset_temperature(self, sids):
+    def reset_temperature(self, sids, t=50):
         # give active reads a boost in temperature
         for s in sids:
             try:
                 seqo = self.sequences[s]
-                seqo.temperature = 20
+                seqo.temperature = t
             except KeyError:
                 pass
 
