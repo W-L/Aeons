@@ -861,6 +861,7 @@ class AeonsRun:
             os.mkdir(f'{args.out_dir}/masks')
             os.mkdir(f'{args.out_dir}/fq')
             os.mkdir(f'{args.out_dir}/logs')
+            os.mkdir(f'{args.out_dir}/contigs')
             # os.mkdir(f'{args.out_dir}/fq/NV')
             # os.mkdir(f'{args.out_dir}/fq/AE')
             # os.mkdir(f'{args.out_dir}/metrics')
@@ -1728,7 +1729,8 @@ class AeonsRun:
             node_size=self.args.node_size,
             lim=self.args.lowcov,
             ccl=self.rl_dist.approx_ccl,
-            out_dir=self.args.out_dir)
+            out_dir=self.args.out_dir,
+            write=True)  # TODO switch for readfish output TEST THIS
 
 
         # self.strat_csv(self.strat, node2pos)  # this is for bandage viz
