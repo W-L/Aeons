@@ -917,8 +917,10 @@ class AeonsRun:
         self.prep_first_ava()
 
         # initialise a RepeatFilter from first AVA
-        self.repeat_filter = RepeatFilter(name=args.name, ava_dict=self.ava.ava_dict, seqpool=self.pool.sequences, filters=self.filt)
-        self.remove_seqs(sequences=self.repeat_filter.affected_sids)
+        if self.args.filter_repeats:
+            self.repeat_filter = RepeatFilter2(name=args.name, seqpool=self.pool)
+        # self.repeat_filter = RepeatFilter(name=args.name, ava_dict=self.ava.ava_dict, seqpool=self.pool.sequences, filters=self.filt)
+        # self.remove_seqs(sequences=self.repeat_filter.affected_sids)
 
         # create first asm
         # makes contigs, saves graph, loads adj, finds comp ends
