@@ -9,6 +9,15 @@ from .aeons_paf import Paf
 
 
 
+class Indexer:
+    """
+    simple indexing wrapper around mappy
+    """
+
+    def __init__(self, fasta, mmi, t=6):
+        self.aligner = mappy.Aligner(fn_idx_in=fasta, fn_idx_out=mmi, preset="map-ont", n_threads=t)
+
+
 
 class LinearMapper:
     """
