@@ -10,6 +10,7 @@ from .aeons_paf import PafLine
 from .aeons_utils import execute, find_exe, write_logs, empty_file, random_id, find_blocks_generic
 from .aeons_polisher import Polisher
 from .aeons_kmer import euclidean_dist, euclidean_threshold
+from .aeons_mapper import Indexer
 
 
 class SequenceAVA:
@@ -1043,6 +1044,7 @@ class ContigPool(SequencePool):
         if write:
             logging.info("writing new strategies")
             self._write_contig_strategies(out_dir=out_dir)
+            self._write_index_file(out_dir=out_dir)
         return contig_strats
 
 
@@ -1094,8 +1096,18 @@ class ContigPool(SequencePool):
             seqo.write_strat(self, out_dir=out_dir)
 
 
-
-
+    def _write_index_file(self, out_dir):
+        # write new index file to map against
+        # and place marker file to tell readfish to reload
+        fa_path = f'{out_dir}/contigs/aeons.fa'
+        mmi_path = f'{out_dir}/contigs/aeons.mmi'
+        # save the contigs to fasta
+        self.write_seq_dict(seq_dict=self.sequences.seqdict(), file=fa_path)
+        # generate and save index with mappy
+        Indexer(fasta=fa_path, mmi=mmi_path)
+        # place a marker that the contigs were updated
+        markerfile = f'{out_dir}/contigs/contigs.updated'
+        Path(markerfile).touch()
 
 
 class Unitig:
