@@ -533,16 +533,6 @@ class Sequence:
         return self.strat
 
 
-    def write_strat(self, out_dir):
-        # write new strategy for readfish
-        # and place marker file to tell readfish to reload
-        cpath = f'{out_dir}/masks/{self.header}'
-        np.save(cpath, self.strat)
-        # place a marker that the strategies were updated
-        markerfile = f'{out_dir}/masks/masks.updated'
-        Path(markerfile).touch()
-        # TODO to load ? check readfish code
-        # t = np.load(f'{self.const.name}.strat.npy', allow_pickle=True)[()]
 
 
 
@@ -1048,7 +1038,7 @@ class ContigPool(SequencePool):
         contig_strats = self._find_contig_strategies(node_size=node_size, ccl=ccl)
         if write:
             logging.info("writing new strategies")
-            self._write_contig_strategies(out_dir=out_dir)
+            self._write_contig_strategies(out_dir=out_dir, contig_strats=contig_strats)
             self._write_index_file(out_dir=out_dir)
         return contig_strats
 
@@ -1095,10 +1085,16 @@ class ContigPool(SequencePool):
         return contig_strats
 
 
-    def _write_contig_strategies(self, out_dir):
-        # write the strategies for all contigs to files
-        for header, seqo in self.sequences.items():
-            seqo.write_strat(self, out_dir=out_dir)
+    def _write_contig_strategies(self, out_dir, contig_strats):
+        # write the strategies for all contigs to a single file
+        cpath = f'{out_dir}/masks/aeons'
+        np.savez(cpath, **contig_strats)
+        # container = np.load(f'{cpath}.npz')
+        # data = {key: container[key] for key in container}
+        # place a marker that the strategies were updated
+        markerfile = f'{out_dir}/masks/masks.updated'
+        Path(markerfile).touch()
+
 
 
     def _write_index_file(self, out_dir):
@@ -1107,7 +1103,10 @@ class ContigPool(SequencePool):
         fa_path = f'{out_dir}/contigs/aeons.fa'
         mmi_path = f'{out_dir}/contigs/aeons.mmi'
         # save the contigs to fasta
-        self.write_seq_dict(seq_dict=self.sequences.seqdict(), file=fa_path)
+        with open(fa_path, 'w') as fasta:
+            for sid, seqo in self.sequences.items():
+                fasta.write(f'>{sid}\n')
+                fasta.write(f'{seqo.seq}\n')
         # generate and save index with mappy
         Indexer(fasta=fa_path, mmi=mmi_path)
         # place a marker that the contigs were updated
