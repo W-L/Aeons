@@ -59,6 +59,7 @@ class Constants:
         # self.window = 1               # whether strategies are written per base or downsized
         self.wait = 60                  # waiting time in live version
         self.cov_wait = 2
+        self.temperature = 30
 
         # TODO tmp
         # self.redotable = "/hps/software/users/goldman/lukasw/redotable/redotable_v1.1/redotable"
@@ -1528,7 +1529,7 @@ class AeonsRun:
         self.remove_seqs(sequences=cont)
         # affect the overlappers
         ovl = ovl_new | ovl_onto
-        self.pool.reset_temperature(ovl)
+        self.pool.reset_temperature(ovl, t=self.args.temperature)
 
 
 
