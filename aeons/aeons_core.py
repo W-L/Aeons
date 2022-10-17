@@ -1292,7 +1292,7 @@ class AeonsRun:
         # separate file separated by sources
         source_counts = self.check_sources(read_sources=self.stream.read_sources)
 
-        stypes = ['acc', 'rej', 'unm']
+        stypes = ['accepted', 'rejected', 'unmapped']
         for i in range(3):
             scount = source_counts[i]
             for name, count in scount.items():
@@ -1309,7 +1309,7 @@ class AeonsRun:
                'batch': self.batch,
                'ref': 'total',
                'count': self.accept_count / bsize,
-               'dec': 'acc'}
+               'dec': 'accepted'}
 
         self.metrics_sep = append_row(self.metrics_sep, row)
         # for total counts across all sources
@@ -1317,7 +1317,7 @@ class AeonsRun:
                'batch': self.batch,
                'ref': 'total',
                'count': self.reject_count / bsize,
-               'dec': 'rej'}
+               'dec': 'rejected'}
 
         self.metrics_sep = append_row(self.metrics_sep, row)
         # for total counts across all sources
@@ -1325,7 +1325,7 @@ class AeonsRun:
                'batch': self.batch,
                'ref': 'total',
                'count': self.unmapped_count_lm / bsize,
-               'dec': 'unm'}
+               'dec': 'unmapped'}
 
         self.metrics_sep = append_row(self.metrics_sep, row)
 
