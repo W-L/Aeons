@@ -1005,6 +1005,42 @@ class SequencePool:
         return tag_dict
 
 
+
+    @staticmethod
+    def load_unitigs(gfa):
+        # load unitigs after graph cleaning with gfatools
+        # read either a gfa file or a string
+        # split the lines
+        # this makes sure that the unitigs are split
+        # and that we can filter the link lines
+        # first check if there are any unitigs
+        if len(gfa) == 0:
+            return []
+
+        if gfa.startswith('S\t'):
+            gfat = gfa
+        else:
+            with open(gfa, 'r') as fh:
+                gfat = fh.read()
+        # string operations
+        gfatt = gfat.split('\nS\t')
+        # first and last need extra treatment
+        gfatt[0] = gfatt[0][2:]  # skip the first "S\t"
+        gfatt[-1] = gfatt[-1].replace('\nx', '\nL').split('\nL')[0]  # exclude all L and x lines
+
+        # get the x lines
+        gfax = gfat.split('\nx\t')[1:]
+        # make sure we have the same number of S_A lines and x lines
+        assert len(gfatt) == len(gfax)
+
+        # parse into unitig objects
+        unitigs = []
+        for sa_lines, x_line in zip(gfatt, gfax):
+            unitigs.append(Unitig(sa_lines.split('\n'), x_line))
+        return unitigs
+
+
+
     def is_intra(self, seq1, seq2):
         # takes two sequence names and runs euclidean distance of tetramers
         # this is to check whether the sequences would be classified as intraspecific
