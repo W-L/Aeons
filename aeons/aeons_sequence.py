@@ -577,13 +577,8 @@ class SequencePool:
 
     def ingest(self, seqs):
         # add a pile of sequences to the pool
-        # can read from a fastq, ingest a dict from a stream, or add an existing pool
-        skipped = 0
-        if type(seqs) == str:
-            pass  # TODO live
-            # skipped = self._ingest_file(seqs=seqs, covs=covs)
-
-        elif type(seqs) == dict:
+        # can read from a dict, or add an existing pool
+        if type(seqs) == dict:
             skipped = self._ingest_dict(seqs=seqs)
             logging.info(f"ingested: {len(seqs) - skipped} pool size: {len(self.sequences.keys())}")
 
@@ -592,21 +587,8 @@ class SequencePool:
             logging.info(f"ingested: {len(seqs.sequences)} pool size: {len(self.sequences.keys())}")
 
         else:
-            logging.info("seqs need to be fq file, dict, or SequencePool")
+            logging.info("seqs need to be dict, or SequencePool")
 
-
-
-    # def _ingest_file(self, seqs, covs):
-    #     # ingest sequences from a file  # TODO live
-    #     skipped = 0
-    #     with open(seqs, 'r') as fqf:
-    #         for desc, name, seq, _ in readfq(fqf):
-    #             if len(seq) > self.args.min_len:
-    #                 self.sequences[str(name)] = seq
-    #                 self._ingest_coverage(rid=name, seq=seq, covs=covs)
-    #             else:
-    #                 skipped += 1
-    #     return skipped
 
 
     def _ingest_dict(self, seqs):
