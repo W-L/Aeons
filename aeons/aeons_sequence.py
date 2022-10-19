@@ -853,8 +853,7 @@ class SequencePool:
         # collect a subdict of sequences that are longer than some limit
         contigs = {header: seqo for header, seqo in self.sequences.items() if len(seqo.seq) > min_contig_len}
         if not contigs:
-            logging.info("no contigs detected. Try starting with more data")
-            exit()
+            return False
         contig_pool = SequencePool(sequences=contigs)
         return contig_pool
 
