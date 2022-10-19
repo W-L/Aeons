@@ -738,6 +738,80 @@ class AeonsRun:
         return res
 
 
+
+    def process_batch_live(self):
+        # LIVE version
+        logging.info(f"\n\n\n Next batch ---------------------------- # {self.batch}")
+        tic = time.time()
+
+        # find new fastq files
+        new_fastq, self.processed_files = LiveRun.scan_dir(
+            fq=self.args.fq, processed_files=self.processed_files)
+        if not new_fastq:
+            logging.info("no new files, deferring update ")
+            return self.args.wait
+
+        # add the new files to the set of processed files
+        self.processed_files.update(new_fastq)
+        self.n_fastq += len(new_fastq)
+        fq_batch = FastqBatch(fq_files=new_fastq, channels=self.channels)
+        self.rl_dist.update(read_lengths=fq_batch.read_lengths, recalc=True)
+        new_reads = fq_batch.read_sequences
+
+        # ---------- from here analogous to sim
+
+        # filter sequences with repeats at the end
+        if self.args.filter_repeats:
+            reads_filtered = self.repeat_filter.filter_batch(seq_dict=new_reads)
+        else:
+            reads_filtered = new_reads
+
+        # load new sequences, incl length filter
+        sequences = SequencePool(sequences=reads_filtered, min_len=self.filt.min_seq_len)
+        # add new sequences to AVA
+        self.add_new_sequences(sequences=sequences)
+        # check for overlaps and containment in pool
+        self.overlap_pool()
+        # trim sequences that might lead to overlaps
+        self.trim_sequences()
+
+        # call wrapper to update assembly
+        contigs = self.assemble_add_and_filter_contigs()
+        contig_pool = ContigPool(sequences=contigs.sequences)
+
+        if self.args.polish:
+            cpolished = self.pool.polish_sequences(contigs=contigs, read_sources=fq_batch.read_sources)
+            contigs = self.pool.declare_contigs(min_contig_len=self.filt.min_contig_len)
+            self.ava.remove_from_ava(sequences=cpolished)
+
+        # write the current pool to file for mapping against
+        self.pool.write_seq_dict(seq_dict=contigs.seqdict(), file=self.pool.contig_fa)
+
+        # check if we have any frozen sequences
+        frozen_ids = self.pool.decrease_temperature(lim=self.filt.min_contig_len)
+        self.remove_seqs(sequences=frozen_ids)
+
+        self.strat = contig_pool.process_contigs(
+            node_size=self.args.node_size,
+            lim=self.args.lowcov,
+            ccl=self.rl_dist.approx_ccl,
+            out_dir=self.args.out_dir,
+            write=True)
+
+        # collect metrics
+        # self.collect_metrics()   # TODO do we want any?
+
+        # end bit for timing next scan
+        toc = time.time()
+        passed = toc - tic
+        next_update = int(self.args.wait - passed)
+        logging.info(f"batch took: {passed}")
+        logging.info(f"finished updating masks, waiting for {next_update} ... \n")
+        self.batch += 1
+        return next_update
+
+
+
     # @profile
     def process_batch(self):
         logging.info(f'\n NEW BATCH #############################  {self.batch}')
