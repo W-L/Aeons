@@ -12,6 +12,7 @@ from .aeons_repeats import RepeatFilter, RepeatFilter2
 # STANDARD LIBRARY
 import os
 import gzip
+import sys
 import glob
 import time
 import logging
@@ -28,6 +29,8 @@ import numpy as np
 import toml
 
 from minknow_api.manager import Manager
+from minknow_api import __version__ as minknow_api_version
+
 
 
 # TODO tmp imports
