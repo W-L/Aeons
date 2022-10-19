@@ -83,23 +83,10 @@ class AeonsRun:
 
         self.args = args
         self.name = args.name
-        self.processed_files = {}
+
         self.read_sources = dict()
-        # for keeping track of the sequencing time
-        self.time_naive = 0
-        self.time_aeons = 0
         # initial strategy is accept
         self.strat = 1
-        # for writing reads to file
-        self.cache_naive = dict()
-        self.cache_aeons = dict()
-        # after how much time should the sequenced be written to file
-        # dump time is incremented every time a batch is written, which happens once that is overcome
-        self.dump_every = args.dumptime
-        self.dump_number_naive = 1
-        self.dump_number_aeons = 1
-        self.dump_time = self.dump_every
-
         # for plotting afterwards, we keep a list of rows
         self.metrics = defaultdict(list)
         self.metrics_sep = defaultdict(list)
@@ -114,72 +101,132 @@ class AeonsRun:
             os.mkdir(f'{args.out_dir}/fq')
             os.mkdir(f'{args.out_dir}/logs')
             os.mkdir(f'{args.out_dir}/contigs')
-            # os.mkdir(f'{args.out_dir}/fq/NV')
-            # os.mkdir(f'{args.out_dir}/fq/AE')
-            # os.mkdir(f'{args.out_dir}/metrics')
-
-        # for storing the batches of reads for snakesembly
-        if not os.path.exists('./00_reads'):
-            os.mkdir('./00_reads')
-        empty_file(f'00_reads/{self.args.name}_0_naive.fa')
-        empty_file(f'00_reads/{self.args.name}_0_aeons.fa')
 
         # initialise a log file in the output folder
         init_logger(logfile=f'{args.out_dir}/{args.name}.aeons.log', args=args)
 
-        # init fastq stream
-        # continous blocks for local (i.e. for reading from usb)
-        # seems like the mmap is also faster on the cluster? might depend on exact filesystem?
-        # if not args.remote:
-        self.stream = FastqStream_mmap(source=self.args.fq, batchsize=self.args.bsize,
-                                       maxbatch=self.args.maxb, seed=self.args.seed)
-        # else:
-        #     self.stream = FastqStream(source=self.args.fq, bsize=self.args.bsize,
-        #                               seed=self.args.seed, workers=self.args.workers)
         self.filt = Filters()
         self.pool = SequencePool(name=args.name, min_len=self.filt.min_seq_len, out_dir=args.out_dir)
         self.ava = SequenceAVA(paf=f'{args.name}.ava', tetra=args.tetra, filters=self.filt)
         self.rl_dist = ReadlengthDist(mu=args.mu)
 
 
-        # load a mapper for some reference
-        # used to validate mergers in testing
-        # if args.ref:
-        #     self.reference_mapper = LinearMapper(ref=args.ref)
+        if not args.live:
+            # for keeping track of the sequencing time
+            self.time_naive = 0
+            self.time_aeons = 0
+            # for writing reads to file
+            self.cache_naive = dict()
+            self.cache_aeons = dict()
+            # after how much time should sequences be written to file
+            # dump time is incremented every time a batch is written, which happens once that is overcome
+            self.dump_every = args.dumptime
+            self.dump_number_naive = 1
+            self.dump_number_aeons = 1
+            self.dump_time = self.dump_every
+            # INITS FOR SIM ONLY
+            # for storing the batches of reads for snakesembly
+            if not os.path.exists('./00_reads'):
+                os.mkdir('./00_reads')
+            empty_file(f'00_reads/{self.args.name}_0_naive.fa')
+            empty_file(f'00_reads/{self.args.name}_0_aeons.fa')
 
+            # init fastq stream - continous blocks for local (i.e. for reading from usb)
+            self.stream = FastqStream_mmap(source=self.args.fq, batchsize=self.args.bsize,
+                                           maxbatch=self.args.maxb, seed=self.args.seed)
+            # self.stream = FastqStream(source=self.args.fq, bsize=self.args.bsize,
+            #                           seed=self.args.seed, workers=self.args.workers)
 
-        # load some initial batches
-        if not args.preload:
-            if self.args.binit:
-                self.load_init_batches(binit=self.args.binit)
-            # if binit is set to 0, we calculate how many batches it takes to cover the genome x times
+            # load a mapper for some reference
+            # used to validate mergers in testing
+            # if args.ref:
+            #     self.reference_mapper = LinearMapper(ref=args.ref)
+
+            # load some initial batches
+            if not args.preload:
+                if self.args.binit:
+                    self.load_init_batches(binit=self.args.binit)
+                # if binit is set to 0, we calculate how many batches it takes to cover the genome x times
+                else:
+                    binit = self.wait_for_batches(bsize=self.args.bsize, cov=self.args.cov_wait, gsize=self.args.gsize)
+                    logging.info(f"loading {binit} batches...")
+                    self.load_init_batches(binit=binit)
+                # increment time after preloading
+                self.update_times(read_sequences=self.pool.seqdict(), reads_decision=self.pool.seqdict())
+
             else:
-                binit = self.wait_for_batches(bsize=self.args.bsize, cov=self.args.cov_wait, gsize=self.args.gsize)
-                logging.info(f"loading {binit} batches...")
-                self.load_init_batches(binit=binit)
-            # increment time after preloading
-            self.update_times(read_sequences=self.pool.seqdict(), reads_decision=self.pool.seqdict())
+                self.load_init_contigs(preload=self.args.preload)
+            # set the batch counter for the run
+            self.batch = self.stream.batch
+
+            # fill the initial AVA
+            self.prep_first_ava()
+
+            # initialise a RepeatFilter from first AVA
+            if self.args.filter_repeats:
+                self.repeat_filter = RepeatFilter2(name=args.name, seqpool=self.pool)
+
+            # create first asm
+            self.assemble_add_and_filter_contigs()
+
+
 
         else:
-            self.load_init_contigs(preload=self.args.preload)
+            # LIVE RUN INITIALISATION
+            # initialisation waits until X files are available
+            self.init_live(args=args)
 
-        self.batch = self.stream.batch
+            contigs = False
+            new_fastq = []
+            while not contigs:
+                # waiting until we have some data
+                logging.info("no contigs yet. Waiting for data ... ")
+                new_fastq = []
+                while len(new_fastq) < 2:
+                    logging.info("waiting for data ... ")
+                    time.sleep(5)
+                    new_fastq = LiveRun.scan_dir(fq=self.args.fq, processed_files=set())
+                # transform files into batch
+                fq_batch = FastqBatch(fq_files=new_fastq, channels=self.channels)
+                # reset these in case the loop has to run
+                self.pool = SequencePool(name=args.name, min_len=self.filt.min_seq_len, out_dir=args.out_dir)
+                self.ava = SequenceAVA(paf=f'{args.name}.ava', tetra=args.tetra, filters=self.filt)
+                self.pool.ingest(seqs=fq_batch.read_sequences)
+                # fill the initial AVA
+                self.prep_first_ava()
+                # create first asm
+                contigs = self.assemble_add_and_filter_contigs()
+            # once there are contigs, record used files
+            self.processed_files = set()
+            self.processed_files.update(new_fastq)
+            self.n_fastq = len(new_fastq)
+            logging.info("Initial asm completed\n\n")
 
-        # fill the initial AVA
-        self.prep_first_ava()
-
-        # initialise a RepeatFilter from first AVA
-        if self.args.filter_repeats:
-            self.repeat_filter = RepeatFilter2(name=args.name, seqpool=self.pool)
-        # self.repeat_filter = RepeatFilter(name=args.name, ava_dict=self.ava.ava_dict, seqpool=self.pool.sequences, filters=self.filt)
-        # self.remove_seqs(sequences=self.repeat_filter.affected_sids)
-
-        # create first asm
-        # makes contigs, saves graph, loads adj, finds comp ends
-        # self.create_init_asm()
-        self.assemble_add_and_filter_contigs()
 
 
+    def init_live(self, args):
+        # initialise seq device dependent things
+        # - find the output path where the fastq files are placed
+        # - and where the channels toml is if we need that
+        self.processed_files = set()
+        self.batch = 0
+
+        # connect to sequencing machine and grab the output directory
+        # allows also to specify at cl for debugging
+        if not self.args.fq:
+            out_path = LiveRun.connect_sequencer(device=args.device, host=args.host, port=args.port)
+            self.args.fq = f'{out_path}/fastq_pass'
+        else:
+            # DEBUGGING
+            out_path = self.args.fq
+
+        # grab channels of the condition - irrelevant if not splitting flowcell
+        if args.split_flowcell:
+            channels = LiveRun.split_flowcell(out_path=out_path, run_name=args.name)
+        else:
+            # if we use a whole flowcell, use all channels
+            channels = set(np.arange(1, 512 + 1))
+        self.channels = channels
 
 
 
@@ -282,6 +329,8 @@ class AeonsRun:
         # write the current pool to file for mapping against
         logging.info("finding contigs to map against.. ")
         contigs = self.pool.declare_contigs(min_contig_len=self.filt.min_contig_len)
+        if not contigs:
+            return False
         SequencePool.write_seq_dict(seq_dict=contigs.seqdict(), file=self.pool.contig_fa)
         return contigs
 
