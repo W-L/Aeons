@@ -951,23 +951,27 @@ class LiveRun:
 
 
 
-class FastqFile:
+class FastqBatch:
 
-    def __init__(self):
-        # this is for the live version when we read actual files instead of
-        # getting data from a stream
-        pass
+    def __init__(self, fq_files, channels):
+        # this is for the live version when we read actual files
+        self.read_batch(fq_files=fq_files, channels=channels)
+
+
 
 
     def read_batch(self, fq_files, channels):
         # read sequencing data from all new files
-        read_sequences = dict()
+        read_sequences = {}
+        read_sources = {}
 
         for fq in fq_files:
             rseq = self._read_single_batch(fastq_file=fq, channels=channels)
             read_sequences.update(rseq)
+            read_sources.update({header: fq for header in rseq.keys()})
 
         self.read_sequences = read_sequences
+        self.read_sources = read_sources
         self.read_ids = set(read_sequences.keys())
         self.read_lengths = {rid: len(seq) for rid, seq in read_sequences.items()}
         self.total_bases = np.sum(list(self.read_lengths.values()))
@@ -1014,33 +1018,7 @@ class FastqFile:
                     # check if the read comes from a channel that is in the set of selected channels
                     read_sequences[str(name)] = seq
         fh.close()
-
-        logging.info(f"processing {len(read_sequences)} reads in this batch")
         return read_sequences
-
-
-
-    @staticmethod
-    def simple_read_batch(fastq_file):
-        # fill the dicts read_lengths and read_sequences with all reads
-        read_lengths = {}
-        read_sequences = {}
-
-        # to make sure its a path object, not a string
-        if type(fastq_file) is str:
-            fastq_file = Path(fastq_file)
-
-        fh = open(fastq_file, 'rt')
-
-        for desc, name, seq, qual in readfq(fh):
-            bases_in_read = len(seq)
-            read_lengths[str(name)] = bases_in_read
-            read_sequences[str(name)] = seq
-
-        fh.close()
-
-        return read_lengths, read_sequences
-
 
 
 
