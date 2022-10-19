@@ -816,75 +816,90 @@ class AeonsRun:
 
 class LiveRun:
 
-    def __init__(self):
-        pass
-
-        # if this is a live run, initialise the sequencing device output
-        # if args.live:
-        #     pass
-            # fq, channels = LiveRun.init_live(device=args.device, host=args.host, port=args.port,
-            #                                         quadrants=args.quadrant, run_name=args.name)
-            # self.args.fq = fq
-            # self.channels = channels
 
     @staticmethod
-    def init_live(device, host, port, quadrants, run_name):
-        # initialise seq device dependent things
-        # - find the output path where the fastq files are placed
-        # - and where the channels toml is if we need that
-        pass
+    def split_flowcell(out_path, run_name):
+        # out_path = "/nfs/research/goldman/lukasw/BR/data/zymo_all_live/20211124_boss_runs_log_live_001/20211124_1236_X2_FAQ09307_bfb985c5"
+        channel_path = f'{out_path}/channels.toml'
+        logging.info(f'looking for channels specification at : {channel_path}')
+        channels_found = False
+        while channels_found == False:
+            if not os.path.isfile(channel_path):
+                logging.info("channels file does not exist (yet), waiting for 30s")
+                time.sleep(30)
+            else:
+                channels = LiveRun._grab_channels(channels_toml=channel_path, run_name=run_name)
+                channels_found = True
+        # channels successfully found
+        logging.info(f"found channels specification: Using {len(channels)} channels.")
+        return channels
 
-        # try:
-        #     out_path = LiveRun._grab_output_dir(device=device, host=host, port=port)
-        #     logging.info(f"grabbing Minknow's output path: \n{out_path}\n")
-        #     fastq_dir = f'{out_path}/fastq_pass'
-        # except:
-        #     logging.info("Minknow's output dir could not be inferred from device name. Exiting.")
-        #     logging.info(f'{device}\n{host}\n{port}')
-        #     # out_path = "/home/lukas/Desktop/BossRuns/playback_target/data/pb01/no_sample/20211021_2209_MS00000_f1_f320fce2"
-        #     # args.fq = out_path
-        #     exit()
-        #
-        # # grab channels of the condition - might be irrelevant if we don't have quadrants
-        # if quadrants:
-        #     # out_path = "/nfs/research/goldman/lukasw/BR/data/zymo_all_live/20211124_boss_runs_log_live_001/20211124_1236_X2_FAQ09307_bfb985c5"
-        #     channel_path = f'{out_path}/channels.toml'
-        #     logging.info(f'looking for channels specification at : {channel_path}')
-        #     channels_found = False
-        #     while channels_found == False:
-        #         if not os.path.isfile(channel_path):
-        #             logging.info("channels file does not exist (yet), waiting for 30s")
-        #             time.sleep(30)
-        #         else:
-        #             channels = LiveRun._grab_channels(channels_toml=channel_path, run_name=run_name)
-        #             channels_found = True
-        #     # channels successfully found
-        #     logging.info(f"found channels specification: BOSS uses {len(channels)} channels.")
-        # else:
-        #     # if we use a whole flowcell, use all channels
-        #     channels = set(np.arange(1, 512 + 1))
-        #
-        # return fastq_dir, channels
+
+
+    @staticmethod
+    def connect_sequencer(device, host, port):
+        try:
+            out_path = LiveRun._grab_output_dir(device=device, host=host, port=port)
+            logging.info(f"grabbing Minknow's output path: \n{out_path}\n")
+        except:
+            logging.info("Minknow's output dir could not be inferred from device name. Exiting.")
+            logging.info(f'\n{device}\n{host}\n{port}')
+            out_path = ""  # dummy
+            # out_path = "/home/lukas/Desktop/BossRuns/playback_target/data/pb01/no_sample/20211021_2209_MS00000_f1_f320fce2"
+            exit()
+        return out_path
+
 
 
     @staticmethod
     def _grab_output_dir(device, host='localhost', port=None):
+        '''
+        Capture the output directory of MinKNOW,
+        i.e. where fastq files are deposited during sequencing
+        host and port should be optional if BOSS-RUNS is run on the sequencing machine
+
+        Parameters
+        ----------
+        device: str
+            device name of the 'position' in the sequencing machine
+        host: str
+            hostname to connect to for MinKNOW
+        port: int
+            override default port to connect to
+
+        Returns
+        -------
+
+        '''
+        logging.info(f"minknow API Version {minknow_api_version}")
         # minknow_api.manager supplies Manager (wrapper around MinKNOW's Manager gRPC)
-        # Construct a manager using the host + port provided.
-        manager = Manager(host=host, port=port, use_tls=False)
+        if minknow_api_version.startswith("5"):
+            if not port:
+                port = 9502
+            manager = Manager(host=host, port=port)
+        elif minknow_api_version.startswith("4"):
+            if not port:
+                port = 9501
+            manager = Manager(host=host, port=port, use_tls=False)
+        else:
+            logging.info("unsupported version of minknow_api")
+            sys.exit()
         # Find a list of currently available sequencing positions.
         positions = list(manager.flow_cell_positions())
         pos_dict = {pos.name: pos for pos in positions}
-
         # index into the dict of available devices
         try:
             target_device = pos_dict[device]
         except KeyError:
-            logging.info(f"target device {device} not available")
-            return None
+            logging.info(f"Error: target device {device} not available")
+            logging.info("Error: Please make sure to supply correct name of sequencing position in MinKNOW.")
+            sys.exit()
         # connect to the device and navigate api to get output path
         device_connection = target_device.connect()
-        out_path = device_connection.protocol.get_current_protocol_run().output_path
+        current_run = device_connection.protocol.get_current_protocol_run()
+        run_id = current_run.run_id
+        logging.info(f"connected to run_id: {run_id}")
+        out_path = current_run.output_path
         return out_path
 
 
@@ -892,7 +907,7 @@ class LiveRun:
     def _grab_channels(channels_toml, run_name):
         # parse the channels TOML file
         toml_dict = toml.load(channels_toml)
-        # find the condition that corresponds to BR
+        # find the corresponding condition
         correct_key = ''
         for key in toml_dict["conditions"].keys():
             name = toml_dict["conditions"][key]["name"]
@@ -901,57 +916,36 @@ class LiveRun:
                 break
         try:
             selected_channels = set(toml_dict["conditions"][correct_key]["channels"])
-            logging.info("grabbing channel numbers for BOSS condition")
+            logging.info("grabbing channel numbers ...")
             return selected_channels
         except UnboundLocalError:
             logging.info("--name in .params not found in channel-specification toml. Exiting")
             exit()
 
 
-    def scan_dir(self):
-        # instead of making new masks after each file, make them periodically
-        # this method gets triggered after some time has passed
-        # it then scans Minknow's output dir for all deposited files
-        # and we create a new batch from all NEW files
+    @staticmethod
+    def scan_dir(fq, processed_files):
+        # preiodically scanning Minknow's output dir
+        # create new batch from all NEW files
         patterns = ["*.fq.gz", "*.fastq.gz", "*.fastq.gzip", "*.fq.gzip", "*.fastq", "*.fq"]
         all_fq = set()
         for p in patterns:
-            all_fq.update(glob.glob(f'{self.args.fq}/{p}'))  # TODO change to argument - live version
+            all_fq.update(glob.glob(f'{fq}/{p}'))
 
         # which files have we not seen before?
-        new_fq = all_fq.difference(self.processed_files)
+        new_fq = all_fq.difference(processed_files)
         logging.info(f"found {len(new_fq)} new fq files: \n {new_fq}")
-        # add the new files to the set of processed files
-        self.processed_files.update(new_fq)
         return list(new_fq)
 
 
 
-    def process_batch_live(self):
-        # TODO live
-        # this will ultimately be used for the live version
-        # instead of having a separate subclass and all that
-        logging.info(f"next {self.batch}")
-        tic = time.time()
 
-        # find new fastq files
-        new_fastq = self.scan_dir()
-        if not new_fastq:
-            logging.info("no new files, deferring update ")
-            return self.args.wait
 
-        # TODO cont
-        # update graph
-        # get new strat
-        # update rld
 
-        toc = time.time()
-        passed = toc - tic
-        next_update = int(self.args.wait - passed)
-        logging.info(f"batch took: {passed}")
-        logging.info(f"finished updating masks, waiting for {next_update} ... \n")
-        self.batch += 1
-        return next_update
+
+
+
+
 
 
 class FastqFile:
