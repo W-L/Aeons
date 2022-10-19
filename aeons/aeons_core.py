@@ -1035,7 +1035,7 @@ def setup_parser():
     parser.add_argument('--preload', dest='preload', type=str, default=None, help='path to fasta for pre-loading sequences')                            # OPT
     parser.add_argument('--tetra', dest='tetra', type=int, default=0, help='adds a test for tetramer freq dist before overlapping')                     # OPT
     parser.add_argument('--polish', dest='polish', type=int, default=0, help='whether to run contig polishing (not for scaffold mode)')                 # OPT
-    parser.add_argument('--filter_repeats', dest='filter_repeats', type=int, default=1, help='whether to run repeat filtering')                         # OPT
+    parser.add_argument('--filter_repeats', dest='filter_repeats', type=int, default=0, help='whether to run repeat filtering')                         # OPT
     parser.add_argument('--fq', dest='fq', type=str, default=None, help='path to fastq for streaming')                                          # SIM
     parser.add_argument('--maxb', dest='maxb', type=int, default=4, help='maximum batches')                                                     # SIM
     parser.add_argument('--binit', dest='binit', type=int, default=1, help='loading batches')                                                   # SIM
@@ -1046,10 +1046,11 @@ def setup_parser():
     parser.add_argument('--snake', dest='snake', type=str, default=None, help='path to snakemake config')                                       # SIM   # OPT
     # parser.add_argument('--ref', dest='ref', type=str, default="", help='reference used in quast evaluation and redotable')                   # SIM   # OPT
     # TODO live version
+    parser.add_argument('--live', default=False, action="store_true", help="internally used switch")
     parser.add_argument('--device', default=None, type=str, help="employed device/sequencing position")
     parser.add_argument('--host', default='localhost', type=str, help="host of sequencing device")
     parser.add_argument('--port', default=None, type=str, help="port of sequencing device")
-    parser.add_argument('--quadrants', default=0, type=int, help="assign channels to conditions with channels.toml")
+    parser.add_argument('--split_flowcell', default=False, action="store_true", help="assign channels to conditions with channels.toml")
     return parser
 
 
