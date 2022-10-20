@@ -111,6 +111,9 @@ class AeonsRun:
         self.filt = Filters()
         self.pool = SequencePool(name=args.name, min_len=self.filt.min_seq_len, out_dir=args.out_dir)
         self.ava = SequenceAVA(paf=f'{args.name}.ava', tetra=args.tetra, filters=self.filt)
+        # load dependencies for the Pool and AVA
+        self.pool.load_dependencies()
+        self.ava.load_dependencies()
         self.rl_dist = ReadlengthDist(mu=args.mu)
 
 
