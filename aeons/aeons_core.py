@@ -5,8 +5,8 @@ from .aeons_sampler import FastqStream_mmap
 from .aeons_readlengthdist import ReadlengthDist
 from .aeons_paf import Paf, choose_best_mapper
 from .aeons_mapper import LinearMapper, ValidationMapping
-from .aeons_sequence import SequencePool, SequenceAVA, Unitig, UnitigPool, ContigPool
-from .aeons_repeats import RepeatFilter, RepeatFilter2
+from .aeons_sequence import SequencePool, SequenceAVA, UnitigPool, ContigPool
+from .aeons_repeats import RepeatFilter2
 
 
 # STANDARD LIBRARY
@@ -49,7 +49,7 @@ class Constants:
     def __init__(self):
         self.workers = 4                # so far used in fastqstream read retrieval
         self.mu = 450                   # initial bit of the read for decision making
-        self.node_size = 128            # length of a single node in the graph in bases, determines strategy compression
+        self.node_size = 100            # length of a single node in the graph in bases, determines strategy compression, hard-coded in readfish
         self.rho = 300
         self.alpha = 300
         self.wait = 60                  # waiting time in live version
