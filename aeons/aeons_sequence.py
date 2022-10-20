@@ -1,5 +1,6 @@
 import logging
 import os
+import sys
 from collections import defaultdict
 from copy import deepcopy
 from pathlib import Path
@@ -11,6 +12,20 @@ from .aeons_utils import execute, find_exe, write_logs, empty_file, random_id, f
 from .aeons_polisher import Polisher
 from .aeons_kmer import euclidean_dist, euclidean_threshold
 from .aeons_mapper import Indexer
+
+
+
+class Dependencies:
+    def __init__(self):
+        self.mm2 = find_exe("minimap2")
+        if not self.mm2:
+            sys.exit("Dependency minimap2 not found in path")
+        self.paf2gfa = find_exe("paf2gfa")
+        if not self.paf2gfa:
+            sys.exit("Dependency paf2gfa (gfatools) not found in path")
+
+
+
 
 
 class SequenceAVA:
@@ -26,6 +41,10 @@ class SequenceAVA:
         # TODO ultimately might replace the ava_dict
         self.links = defaultdict(lambda: defaultdict(PafLine))
         self.paf_links = f"{paf}.links.paf"
+
+
+    def load_dependencies(self):
+        self.dep = Dependencies()
 
 
     def load_ava(self, paf, seqpool):
@@ -347,7 +366,7 @@ class SequenceAVA:
             logging.info("no overlaps for merging")
             return False
 
-        comm = f"paf2gfa -i {fa} -u -c {paf}"
+        comm = f"{self.dep.paf2gfa} -i {fa} -u -c {paf}"
         stdout, stderr = execute(comm)
         # writing is not necessary if we use stdout of process
         if gfa:
@@ -539,7 +558,7 @@ class Sequence:
 
 class SequencePool:
 
-    def __init__(self, sequences=None, name="dummy", min_len=3000, out_dir="dummy", threads=12, exe=None):
+    def __init__(self, sequences=None, name="dummy", min_len=3000, out_dir="dummy", threads=12):
         # a unified pool for reads and contigs with persistent AVA
         self.min_len = min_len
         self.out_dir = out_dir
@@ -564,9 +583,10 @@ class SequencePool:
         self.ava = f'{name}.ava'  # ava in paf
         self.gfa = f'{name}.gfa'
 
-        # executables
-        self.exe_mm2 = exe
 
+
+    def load_dependencies(self):
+        self.dep = Dependencies()
 
 
 
@@ -620,12 +640,12 @@ class SequencePool:
         # write current pool to file first
         self.write_seq_dict(seq_dict=sequences, file=fa)
         # then perform all vs all
-        if not self.exe_mm2:
-            self.exe_mm2 = find_exe("minimap2")
+        if not self.dep.mm2:
+            logging.info("could not find minimap2")
 
-        comm = f'{self.exe_mm2} -x ava-ont -t{self.threads} {fa} {fa} >{paf}'
+        comm = f'{self.dep.mm2} -x ava-ont -t{self.threads} {fa} {fa} >{paf}'
         if base_level:
-            comm = f'{self.exe_mm2} -cx ava-ont -t{self.threads} {fa} {fa} >{paf}'
+            comm = f'{self.dep.mm2} -cx ava-ont -t{self.threads} {fa} {fa} >{paf}'
         import time
         tic = time.time()
         stdout, stderr = execute(comm)
@@ -664,14 +684,14 @@ class SequencePool:
         # write new reads to file
         self.write_seq_dict(seq_dict=new_sequences.seqdict(), file=new_fa)
         # ava of new sequences
-        if not self.exe_mm2:
-            self.exe_mm2 = find_exe("minimap2")
+        if not self.dep.mm2:
+            logging.info("could not find minimap2")
 
-        comm = f'{self.exe_mm2} -x ava-ont -t{self.threads} {new_fa} {new_fa} >{new_ava}'
+        comm = f'{self.dep.mm2} -x ava-ont -t{self.threads} {new_fa} {new_fa} >{new_ava}'
         stdout, stderr = execute(comm)
         write_logs(stdout, stderr, f'{self.out_dir}/logs/ava_add')
         # mapping new sequences to previous pool
-        comm = f'{self.exe_mm2} -x map-ont --dual=yes -t{self.threads} {self.fa} {new_fa} >{new_onto_pool}'
+        comm = f'{self.dep.mm2} -x map-ont --dual=yes -t{self.threads} {self.fa} {new_fa} >{new_onto_pool}'
         stdout, stderr = execute(comm)
         write_logs(stdout, stderr, f'{self.out_dir}/logs/map2pool')
         # return filenames to be ingested as AVA
