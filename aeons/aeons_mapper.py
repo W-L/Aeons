@@ -45,7 +45,7 @@ class LinearMapper:
         return paf_dict
 
 
-    def mappy_batch(self, sequences, out="lm_out.paf", truncate=False, log=True):
+    def mappy_batch(self, sequences, out=None, truncate=False, log=True):
         """
         Wrapper function that maps a full batch of reads. Can also be used for the in silico exp
         where we truncate each read to mu bases
@@ -88,8 +88,9 @@ class LinearMapper:
         alignments = '\n'.join(batch_alignments)
 
         # tmp write to file too
-        with open(out, 'w') as lm_out:
-            lm_out.write(alignments)
+        if out:
+            with open(out, 'w') as lm_out:
+                lm_out.write(alignments)
 
         # counting the number of mapped and unmapped fragments
         if log:
