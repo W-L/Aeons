@@ -120,14 +120,17 @@ class AeonsRun:
         if not args.live:
             # for keeping track of the sequencing time
             self.time_naive = 0
+            self.time_readfish = 0
             self.time_aeons = 0
             # for writing reads to file
             self.cache_naive = dict()
+            self.cache_readfish = dict()
             self.cache_aeons = dict()
             # after how much time should sequences be written to file
             # dump time is incremented every time a batch is written, which happens once that is overcome
             self.dump_every = args.dumptime
             self.dump_number_naive = 1
+            self.dump_number_readfish = 1
             self.dump_number_aeons = 1
             self.dump_time = self.dump_every
             # INITS FOR SIM ONLY
@@ -135,6 +138,7 @@ class AeonsRun:
             if not os.path.exists('./00_reads'):
                 os.mkdir('./00_reads')
             empty_file(f'00_reads/{self.args.name}_0_naive.fa')
+            empty_file(f'00_reads/{self.args.name}_0_readfish.fa')
             empty_file(f'00_reads/{self.args.name}_0_aeons.fa')
 
             # init fastq stream - continous blocks for local (i.e. for reading from usb)
@@ -148,20 +152,29 @@ class AeonsRun:
             # if args.ref:
             #     self.reference_mapper = LinearMapper(ref=args.ref)
 
-            # load some initial batches
-            if not args.preload:
-                if self.args.binit:
-                    self.load_init_batches(binit=self.args.binit)
-                # if binit is set to 0, we calculate how many batches it takes to cover the genome x times
-                else:
-                    binit = self.wait_for_batches(bsize=self.args.bsize, cov=self.args.cov_wait, gsize=self.args.gsize)
-                    logging.info(f"loading {binit} batches...")
-                    self.load_init_batches(binit=binit)
-                # increment time after preloading
-                self.update_times(read_sequences=self.pool.seqdict(), reads_decision=self.pool.seqdict())
-
-            else:
+            if args.preload:
                 self.load_init_contigs(preload=self.args.preload)
+
+                # initialise strategy for readfish
+                self.readfish = Readfish(seqpool=self.pool, ref_path=args.preload, mu=self.args.mu)
+            else:
+                self.readfish = None
+
+
+            # load some initial batches
+            if self.args.binit:
+                self.load_init_batches(binit=self.args.binit)
+            # if binit is set to 0, we calculate how many batches it takes to cover the genome x times
+            else:
+                binit = self.wait_for_batches(bsize=self.args.bsize, cov=self.args.cov_wait, gsize=self.args.gsize)
+                logging.info(f"loading {binit} batches...")
+                self.load_init_batches(binit=binit)
+            # increment time after preloading
+            self.update_times(read_sequences=self.pool.seqdict(),
+                              reads_decision=self.pool.seqdict(),
+                              reads_decision_readfish=self.pool.seqdict())
+
+
             # set the batch counter for the run
             self.batch = self.stream.batch
 
@@ -279,7 +292,7 @@ class AeonsRun:
         # i.e. if we want to focus on component ends, not on covering everything all over again
         oz = 10000  # allow overlap zone of this size
         for header, seqo in contig_pool.sequences.items():
-            seqo.cov[oz: -oz] = self.args.lowcov
+            seqo.cov[oz: -oz] = self.args.lowcov + 1
         # add to general pool
         self.pool.ingest(seqs=contig_pool)
 
@@ -432,7 +445,7 @@ class AeonsRun:
 
 
 
-    def update_times(self, read_sequences, reads_decision):
+    def update_times(self, read_sequences, reads_decision, reads_decision_readfish=None):
         # increment the timer counts for naive and aeons
 
         # for naive: take all reads as they come out of the sequencer (memorymap)
@@ -446,11 +459,21 @@ class AeonsRun:
         read_lengths_decision = np.array([len(seq) for seq in reads_decision.values()])
         n_reject = np.sum(np.where(read_lengths_decision == self.args.mu, 1, 0))
         bases_aeons = np.sum(read_lengths_decision)
-        acquisition = self.args.bsize * self.args.alpha
         rejection_cost = n_reject * self.args.rho
         self.time_aeons += (bases_aeons + acquisition + rejection_cost)
         logging.info(f"time aeons: {self.time_aeons}")
 
+        # for readfish: fully sequenced reads (acc & unmapped)
+        # and ((mu + rho) *  no. of rejected reads) + (alpha * batch_size)
+        if not self.readfish:
+            return
+        else:
+            read_lengths_readfish = np.array([len(seq) for seq in reads_decision_readfish.values()])
+            n_reject_readfish = np.sum(np.where(read_lengths_readfish == self.args.mu, 1, 0))
+            bases_readfish = np.sum(read_lengths_readfish)
+            rejection_cost_readfish = n_reject_readfish * self.args.rho
+            self.time_readfish += (bases_readfish + acquisition + rejection_cost_readfish)
+            logging.info(f"time readfish: {self.time_readfish}")
 
 
     def _execute_dump(self, cond, dump_number, cache):
@@ -492,7 +515,7 @@ class AeonsRun:
             self._execute_dump(cond=cond, dump_number=dump_number, cache=cache)
 
 
-    def write_batch(self, read_sequences, reads_decision):
+    def write_batch(self, read_sequences, reads_decision, reads_decision_readfish=None):
         # helper function for both conditions
         def add_to_cache(seqs, cache):
             for rid, seq in seqs.items():
@@ -505,6 +528,10 @@ class AeonsRun:
         # check if time to dump and execute
         self._prep_dump(cond='naive')
         self._prep_dump(cond='aeons')
+
+        if self.readfish:
+            add_to_cache(seqs=reads_decision_readfish, cache=self.cache_readfish)
+            self._prep_dump(cond='readfish')
 
 
 
@@ -529,8 +556,12 @@ class AeonsRun:
                'n_unmapped': self.unmapped_count_lm / bsize,
                'n_reject': self.reject_count / bsize,
                'n_accept': self.accept_count / bsize,
+               'n_reject_readfish': self.readfish.reject_count / bsize,
+               'n_accept_readfish': self.readfish.accept_count / bsize,
+               'n_unmapped_readfish': self.readfish.unmapped_count / bsize,
                'time_aeons': self.time_aeons,
                'time_naive': self.time_naive,
+               'time_readfish': self.time_readfish,
                'pool_size': len(self.pool.sequences.keys())}
 
 
@@ -543,41 +574,63 @@ class AeonsRun:
         df.to_csv(df_csv)
 
         # separate file separated by sources
-        source_counts = self.check_sources(read_sources=self.stream.read_sources)
+        source_counts_aeons, source_counts_readfish = self.check_sources(
+            read_sources=self.stream.read_sources)
 
-        stypes = ['accepted', 'rejected', 'unmapped']
-        for i in range(3):
-            scount = source_counts[i]
-            for name, count in scount.items():
-                row = {'name': self.args.name,
+
+        def append_rows_sep(source_counts, cond):
+            stypes = ['accepted', 'rejected', 'unmapped']
+            for i in range(3):
+                scount = source_counts[i]
+                for name, count in scount.items():
+                    row = {'name': self.args.name,
+                           'batch': self.batch,
+                           'ref': name,
+                           'count': count / bsize,
+                           'dec': stypes[i],
+                           'cond': cond}
+
+
+                    self.metrics_sep = append_row(self.metrics_sep, row)
+
+
+        def append_totals(accept_count, reject_count, unmapped_count, cond):
+            # next 3 are for total counts across all sources
+            row_acc = {'name': self.args.name,
                        'batch': self.batch,
-                       'ref': name,
-                       'count': count / bsize,
-                       'dec': stypes[i]}
+                       'ref': 'total',
+                       'count': accept_count / bsize,
+                       'dec': 'accepted',
+                       'cond': cond}
+            row_rej = {'name': self.args.name,
+                       'batch': self.batch,
+                       'ref': 'total',
+                       'count': reject_count / bsize,
+                       'dec': 'rejected',
+                       'cond': cond}
+            row_unm = {'name': self.args.name,
+                       'batch': self.batch,
+                       'ref': 'total',
+                       'count': unmapped_count / bsize,
+                       'dec': 'unmapped',
+                       'cond': cond}
 
+            self.metrics_sep = append_row(self.metrics_sep, row_acc)
+            self.metrics_sep = append_row(self.metrics_sep, row_rej)
+            self.metrics_sep = append_row(self.metrics_sep, row_unm)
 
-                self.metrics_sep = append_row(self.metrics_sep, row)
-
-        # next 3 are for total counts across all sources
-        row_acc = {'name': self.args.name,
-               'batch': self.batch,
-               'ref': 'total',
-               'count': self.accept_count / bsize,
-               'dec': 'accepted'}
-        row_rej = {'name': self.args.name,
-                   'batch': self.batch,
-                   'ref': 'total',
-                   'count': self.reject_count / bsize,
-                   'dec': 'rejected'}
-        row_unm = {'name': self.args.name,
-               'batch': self.batch,
-               'ref': 'total',
-               'count': self.unmapped_count_lm / bsize,
-               'dec': 'unmapped'}
-
-        self.metrics_sep = append_row(self.metrics_sep, row_acc)
-        self.metrics_sep = append_row(self.metrics_sep, row_rej)
-        self.metrics_sep = append_row(self.metrics_sep, row_unm)
+        append_rows_sep(source_counts=source_counts_aeons, cond="aeons")
+        append_rows_sep(source_counts=source_counts_readfish, cond="readfish")
+        append_totals(
+            accept_count=self.accept_count,
+            reject_count=self.reject_count,
+            unmapped_count=self.unmapped_count_lm,
+            cond='aeons')
+        append_totals(
+            accept_count=self.readfish.accept_count,
+            reject_count=self.readfish.reject_count,
+            unmapped_count=self.readfish.unmapped_count,
+            cond='readfish')
 
         # write to file
         df = pd.DataFrame(self.metrics_sep)
@@ -708,7 +761,21 @@ class AeonsRun:
         reads_decision = self.make_decision_paf(paf_out=paf_trunc,
                                                 read_sequences=self.stream.read_sequences,
                                                 strat=self.strat)
-        return reads_decision
+
+        # READFISH ACTION
+        paf_trunc_readfish = Readfish.map_truncated_reads(
+            mapper=self.readfish.mapper,
+            reads=self.stream.read_sequences
+        )
+
+        reads_decision_readfish = self.readfish.make_decision_paf_readfish(
+            paf_out=paf_trunc_readfish,
+            read_sequences=self.stream.read_sequences,
+            mu=self.args.mu, node_size=self.args.node_size,
+            readfish_strat=self.readfish.strat
+        )
+
+        return reads_decision, reads_decision_readfish
 
 
 
@@ -733,13 +800,19 @@ class AeonsRun:
                 source_counts[source] += 1
             return source_counts
 
-        id_sets = [self.accept_ids, self.reject_ids, self.unmapped_ids]
-        res = []
-        for set_idx in range(3):
-            sources = fetch_sources(id_sets[set_idx], read_sources)
-            res.append(sources)
-        return res
+        def fetch_id_sets(accept_ids, reject_ids, unmapped_ids):
+            id_sets = [accept_ids, reject_ids, unmapped_ids]
+            res = []
+            for set_idx in range(3):
+                sources = fetch_sources(id_sets[set_idx], read_sources)
+                res.append(sources)
+            return res
 
+        res_aeons = fetch_id_sets(
+            self.accept_ids, self.reject_ids, self.unmapped_ids)
+        res_readfish = fetch_id_sets(
+            self.readfish.accept_ids, self.readfish.reject_ids, self.readfish.unmapped_ids)
+        return res_aeons, res_readfish
 
 
     def process_batch_live(self):
@@ -820,16 +893,20 @@ class AeonsRun:
         logging.info(f'\n NEW BATCH #############################  {self.batch}')
         tic = time.time()
 
-        reads_decision = self.sim_batch()
+        reads_decision, reads_decision_readfish = self.sim_batch()
         # update read length dist, time recording
         self.rl_dist.update(read_lengths=self.stream.read_lengths, recalc=True)
-        self.update_times(read_sequences=self.stream.read_sequences, reads_decision=reads_decision)
-        self.write_batch(read_sequences=self.stream.read_sequences, reads_decision=reads_decision)
+        self.update_times(read_sequences=self.stream.read_sequences,
+                          reads_decision=reads_decision,
+                          reads_decision_readfish=reads_decision_readfish)
+        self.write_batch(read_sequences=self.stream.read_sequences,
+                         reads_decision=reads_decision,
+                         reads_decision_readfish=reads_decision_readfish)
 
         #  -------------------------------- POST DECISIONS
         logging.info("")
 
-        if self.batch % 30 == 0:
+        if self.batch % 20 == 0:
             print("breakpoint")
 
         # filter sequences with repeats at the end
@@ -890,6 +967,115 @@ class AeonsRun:
 
     def __repr__(self):
         return str(self.__dict__)
+
+
+
+class Readfish:
+
+    def __init__(self, seqpool, ref_path, mu):
+        self.strat = Readfish.init_strat(seqpool=seqpool)
+        self.mapper = Readfish.init_persistent_mapper(ref_path=ref_path, mu=mu)
+
+
+    @staticmethod
+    def init_strat(seqpool):
+        strat = {}
+        for header, seqo in seqpool.sequences.items():
+            cstrat = np.zeros(shape=(len(seqo.seq), 2))
+            cstrat[-10000:, 0] = 1
+            cstrat[:10000, 1] = 1
+            strat[header] = cstrat
+        return strat
+
+
+    @staticmethod
+    def init_persistent_mapper(ref_path, mu):
+        m = LinearMapper(ref=ref_path, mu=mu, default=False)
+        return m
+
+
+    @staticmethod
+    def map_truncated_reads(mapper, reads):
+        paf_trunc = mapper.mappy_batch(sequences=reads, truncate=True)
+        return paf_trunc
+
+
+
+    def make_decision_paf_readfish(self, paf_out, read_sequences, mu, node_size, readfish_strat):
+        # decide accept/reject for each read
+        # THIS IS FOR READFISH - MODIFIED VERSION
+        paf_dict = Paf.parse_PAF(StringIO(paf_out), min_len=int(mu / 2))
+
+        # if nothing mapped, just return. Unmapped = accept
+        if len(paf_dict.items()) == 0:
+            logging.info("nothing mapped - readfish")
+            return read_sequences
+
+        reads_decision = dict()
+        reject_count = 0
+        accept_count = 0
+        unmapped_count = 0
+
+        reject_ids = set()
+        accept_ids = set()
+        unmapped_ids = set()
+
+        # loop over paf dictionary
+        for record_id, record_list in paf_dict.items():
+            if len(record_list) > 1:
+                # should not happen often since we filter secondary mappings
+                rec = choose_best_mapper(record_list)[0]
+            else:
+                rec = record_list[0]
+
+            # find the start and end position relative to the whole linearised genome
+            if rec.strand == '+':
+                rec.c_start = rec.tstart
+            elif rec.strand == '-':
+                rec.c_start = rec.tend - 1
+            else:
+                continue
+
+            # index into strategy to find the decision
+            try:
+                decision = readfish_strat[str(rec.tname)][rec.c_start // node_size][rec.rev]
+            except KeyError:
+                decision = 1  # if the mapping is not on a preloaded contig
+
+            # ACCEPT
+            if decision:
+                record_seq = read_sequences[rec.qname]
+                accept_count += 1
+                accept_ids.add(rec.qname)
+
+            # REJECT
+            else:
+                record_seq = read_sequences[rec.qname][: mu]
+                reject_count += 1
+                reject_ids.add(rec.qname)
+
+            # append the read's sequence to a new dictionary of the batch after decision making
+            reads_decision[rec.qname] = record_seq
+
+        # all unmapped reads also need to be accepted, i.e. added back into the dict
+        mapped_ids = accept_ids | reject_ids
+
+        for read_id, seq in read_sequences.items():
+            if read_id in mapped_ids:
+                continue
+            else:
+                reads_decision[read_id] = seq
+                unmapped_count += 1
+                unmapped_ids.add(read_id)
+
+        logging.info(f'decisions - rejecting: {reject_count} accepting: {accept_count} unmapped: {unmapped_count}  - readfish ')
+        self.reject_count = reject_count
+        self.accept_count = accept_count
+        self.unmapped_count = unmapped_count
+        self.reject_ids = reject_ids
+        self.accept_ids = accept_ids
+        self.unmapped_ids = unmapped_ids
+        return reads_decision
 
 
 
