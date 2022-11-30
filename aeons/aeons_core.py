@@ -1154,11 +1154,11 @@ class LiveRun:
         if minknow_api_version.startswith("5"):
             if not port:
                 port = 9502
-            manager = Manager(host=host, port=port)
+            manager = Manager(host=host, port=int(port))
         elif minknow_api_version.startswith("4"):
             if not port:
                 port = 9501
-            manager = Manager(host=host, port=port, use_tls=False)
+            manager = Manager(host=host, port=int(port), use_tls=False)
         else:
             logging.info("unsupported version of minknow_api")
             sys.exit()
@@ -1324,7 +1324,7 @@ def setup_parser():
     parser.add_argument('--live', default=False, action="store_true", help="internally used switch")
     parser.add_argument('--device', default=None, type=str, help="employed device/sequencing position")
     parser.add_argument('--host', default='localhost', type=str, help="host of sequencing device")
-    parser.add_argument('--port', default=None, type=str, help="port of sequencing device")
+    parser.add_argument('--port', default=None, type=int, help="port of sequencing device")
     parser.add_argument('--split_flowcell', default=False, action="store_true", help="assign channels to conditions with channels.toml")
     return parser
 
