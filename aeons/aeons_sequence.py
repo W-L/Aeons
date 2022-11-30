@@ -1166,8 +1166,16 @@ class Unitig:
     def _format_x(self, x_line):
         xl = x_line.split("\t")
         assert xl[0].startswith('utg')
-        self.cap_l = True if int(xl[3]) > 0 else False
-        self.cap_r = True if int(xl[4]) > 0 else False
+        try:
+            cl = int(xl[3])
+            cr = int(xl[4])
+        except IndexError:
+            self.cap_l = False
+            self.cap_r = False
+            return
+
+        self.cap_l = True if cl > 0 else False
+        self.cap_r = True if cr > 0 else False
 
 
 
@@ -1180,6 +1188,8 @@ class Unitig:
         sls = sline.split('\t')
         self.seq = sls[1]
         self.length = int(sls[2].split(':')[-1])
+        circ = sls[0][-1]
+        self.circ = True if circ == 'c' else False
         # self.n_atoms = int(sls[3].split(':')[-1])
         assert sls[0].startswith('utg')
         assert self.length == len(self.seq)
@@ -1288,7 +1298,11 @@ class CoverageMerger:
                 atom_arr = atom_arr[: a['n']]  # TODO maybe + 1?
             else:
                 # add last atom (goes until end of atom)
-                atom_arr = atom_arr
+                if not self.unitig.circ:
+                    atom_arr = atom_arr
+                else:
+                    diff = self.unitig.length - a['pos']
+                    atom_arr = atom_arr[:diff]
             arr_parts.append(atom_arr)
             cpos = a['pos']
         return np.concatenate(arr_parts)
