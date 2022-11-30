@@ -156,7 +156,7 @@ class AeonsRun:
                 self.load_init_contigs(preload=self.args.preload)
 
                 # initialise strategy for readfish
-                self.readfish = Readfish(seqpool=self.pool, ref_path=args.preload, mu=self.args.mu)
+                self.readfish = Readfish(seqpool=self.pool, ref_path=args.preload, mu=self.args.mu, node_size=self.args.node_size)
             else:
                 self.readfish = None
 
@@ -556,13 +556,15 @@ class AeonsRun:
                'n_unmapped': self.unmapped_count_lm / bsize,
                'n_reject': self.reject_count / bsize,
                'n_accept': self.accept_count / bsize,
-               'n_reject_readfish': self.readfish.reject_count / bsize,
-               'n_accept_readfish': self.readfish.accept_count / bsize,
-               'n_unmapped_readfish': self.readfish.unmapped_count / bsize,
                'time_aeons': self.time_aeons,
                'time_naive': self.time_naive,
-               'time_readfish': self.time_readfish,
                'pool_size': len(self.pool.sequences.keys())}
+
+        if self.readfish:
+            row['n_reject_readfish'] = self.readfish.reject_count / bsize
+            row['n_accept_readfish'] = self.readfish.accept_count / bsize
+            row['n_unmapped_readfish'] = self.readfish.unmapped_count / bsize
+            row['time_readfish'] = self.time_readfish
 
 
         self.metrics = append_row(self.metrics, row)
@@ -620,17 +622,19 @@ class AeonsRun:
             self.metrics_sep = append_row(self.metrics_sep, row_unm)
 
         append_rows_sep(source_counts=source_counts_aeons, cond="aeons")
-        append_rows_sep(source_counts=source_counts_readfish, cond="readfish")
         append_totals(
             accept_count=self.accept_count,
             reject_count=self.reject_count,
             unmapped_count=self.unmapped_count_lm,
             cond='aeons')
-        append_totals(
-            accept_count=self.readfish.accept_count,
-            reject_count=self.readfish.reject_count,
-            unmapped_count=self.readfish.unmapped_count,
-            cond='readfish')
+
+        if self.readfish:
+            append_rows_sep(source_counts=source_counts_readfish, cond="readfish")
+            append_totals(
+                accept_count=self.readfish.accept_count,
+                reject_count=self.readfish.reject_count,
+                unmapped_count=self.readfish.unmapped_count,
+                cond='readfish')
 
         # write to file
         df = pd.DataFrame(self.metrics_sep)
@@ -762,6 +766,9 @@ class AeonsRun:
                                                 read_sequences=self.stream.read_sequences,
                                                 strat=self.strat)
 
+        if not self.readfish:
+            return reads_decision, dict()
+
         # READFISH ACTION
         paf_trunc_readfish = Readfish.map_truncated_reads(
             mapper=self.readfish.mapper,
@@ -810,6 +817,10 @@ class AeonsRun:
 
         res_aeons = fetch_id_sets(
             self.accept_ids, self.reject_ids, self.unmapped_ids)
+
+        if not self.readfish:
+            return res_aeons, []
+
         res_readfish = fetch_id_sets(
             self.readfish.accept_ids, self.readfish.reject_ids, self.readfish.unmapped_ids)
         return res_aeons, res_readfish
@@ -972,18 +983,19 @@ class AeonsRun:
 
 class Readfish:
 
-    def __init__(self, seqpool, ref_path, mu):
-        self.strat = Readfish.init_strat(seqpool=seqpool)
+    def __init__(self, seqpool, ref_path, mu, node_size):
+        self.strat = Readfish.init_strat(seqpool=seqpool, node_size=node_size)
         self.mapper = Readfish.init_persistent_mapper(ref_path=ref_path, mu=mu)
 
 
     @staticmethod
-    def init_strat(seqpool):
+    def init_strat(seqpool, node_size):
         strat = {}
+        oz = 10000 // node_size
         for header, seqo in seqpool.sequences.items():
-            cstrat = np.zeros(shape=(len(seqo.seq), 2))
-            cstrat[-10000:, 0] = 1
-            cstrat[:10000, 1] = 1
+            cstrat = np.zeros(shape=((len(seqo.seq) // node_size) + 1, 2))
+            cstrat[-oz:, 0] = 1
+            cstrat[:oz, 1] = 1
             strat[header] = cstrat
         return strat
 
