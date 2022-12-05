@@ -645,7 +645,6 @@ class AeonsRun:
         if not sequences:
             return
 
-        self.ava.remove_from_ava(sequences=sequences)
         self.ava.remove_links(sequences=sequences)
         self.pool.remove_sequences(sequences=sequences)
 
@@ -841,7 +840,7 @@ class AeonsRun:
         if self.args.polish:
             cpolished = self.pool.polish_sequences(contigs=contigs, read_sources=fq_batch.read_sources)
             contigs = self.pool.declare_contigs(min_contig_len=self.filt.min_contig_len)
-            self.ava.remove_from_ava(sequences=cpolished)
+            self.ava.remove_links(sequences=cpolished)
 
         # write the current pool to file for mapping against
         self.pool.write_seq_dict(seq_dict=contigs.seqdict(), file=self.pool.contig_fa)
@@ -914,7 +913,7 @@ class AeonsRun:
         if self.args.polish:
             cpolished = self.pool.polish_sequences(contigs=contigs, read_sources=self.read_sources)
             contigs = self.pool.declare_contigs(min_contig_len=self.filt.min_contig_len)
-            self.ava.remove_from_ava(sequences=cpolished)
+            self.ava.remove_links(sequences=cpolished)
 
         # write the current pool to file for mapping against
         self.pool.write_seq_dict(seq_dict=contigs.seqdict(), file=self.pool.contig_fa)
