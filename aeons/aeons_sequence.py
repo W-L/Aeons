@@ -34,11 +34,9 @@ class SequenceAVA:
         self.paf = paf
         self.gfa = f'{paf}.gfa'
         self.filters = filters
-        self.ava_dict = defaultdict(lambda: defaultdict(dict))  # 2 levels of defaultdict
         self.tetra = tetra    # whether to use the tetramer distance to filter overlaps
         # container to keep overlaps
         # save paf lines as qname-tname with alphanum sort
-        # TODO ultimately might replace the ava_dict
         self.links = defaultdict(lambda: defaultdict(PafLine))
         self.paf_links = f"{paf}.links.paf"
 
@@ -74,8 +72,6 @@ class SequenceAVA:
 
                 # append the alignment to both the query and the target
                 ovl += 1
-                self.ava_dict[rec.qname][rec.qside][(rec.tname, rec.tside)] = rec
-                self.ava_dict[rec.tname][rec.tside][(rec.qname, rec.qside)] = rec
                 self.overlaps[(rec.qname, rec.tname)] = rec
                 # TODO new
                 self.links[rec.qname][rec.tname] = rec
@@ -91,19 +87,6 @@ class SequenceAVA:
         return containments, overlappers
 
 
-
-
-    def remove_from_ava(self, sequences):
-        # remove alignments of reads from ava alignments
-        for sid in sequences:
-            # collect the reciprocal targets for removal
-            for side in ['L', 'R']:
-                targets = self.ava_dict[sid][side].keys()
-                for tname, tside in targets:
-                    self.ava_dict[tname][tside].pop((sid, side), None)
-
-            # unlink the outgoing edges
-            self.ava_dict.pop(sid, None)
 
 
     def remove_links(self, sequences):
@@ -163,165 +146,12 @@ class SequenceAVA:
 
 
 
-
-    # def single_links0(self):
-    #     # ensure that we only keep one edge if there are multiple
-    #     logging.info("single links")
-    #     occupied = set()
-    #     for node, edge_dict in list(self.ava_dict.items()):
-    #         # loop over both sides of node
-    #         # each side has its own ava_dict containing possible edges
-    #         for side, avas in edge_dict.items():
-    #             # if there are no edges on a side, skip
-    #             if len(avas) == 0:
-    #                 continue
-    #             # if there is exactly 1 link
-    #             elif len(avas) == 1:
-    #                 (tname, tside), rec = next(iter(avas.items()))
-    #                 # if the target is already occupied
-    #                 if (tname, tside) in occupied:
-    #                     self.ava_dict[node][side].pop((tname, tside), None) # eliminate edge
-    #                 # otherwise we keep it
-    #                 else:
-    #                     self.ava_dict[tname][tside] = {}  # eliminiate reciprocal edge
-    #                     occupied.add((tname, tside))
-    #                     occupied.add((node, side))
-    #             # this is if there are more than 1 possible edge from the node
-    #             else:
-    #                 not_occ = {(tname, tside): rec for (tname, tside), rec in avas.items()
-    #                            if (tname, tside) not in occupied}
-    #                 if not not_occ:  # if all targets are occupied
-    #                     self.ava_dict[node][side] = {}
-    #                     continue
-    #                 # characteristic to choose target
-    #                 # metric = [rec.alignment_block_length for rec in not_occ.values()]
-    #                 metric = [rec.qlen + rec.tlen for rec in not_occ.values()]
-    #                 targets = list(not_occ.keys())
-    #                 max_idx = np.argmax(metric)
-    #                 chosen_t, chosen_t_side = targets[max_idx]
-    #                 rec = avas[(chosen_t, chosen_t_side)]
-    #                 # for the chosen one, put into place
-    #                 self.ava_dict[node][side] = {(chosen_t, chosen_t_side): rec}
-    #                 # also eliminate reciprocal edge
-    #                 self.ava_dict[chosen_t][chosen_t_side] = {}
-    #                 # mark both as occupied
-    #                 occupied.add((node, side))
-    #                 occupied.add((chosen_t, chosen_t_side))
-
-    # def clean_graph(self):
-    #     # TODO depr?
-    #     # clean the graph up
-    #     logging.info("cleaning graph..")
-    #     # check that we have a graph
-    #     if not os.path.getsize(self.gfa0):
-    #         logging.info("no graph, skipping")
-    #         return False
-    #
-    #     comm = f'gfatools asm -r 10000 -t 2,30000 -b 10000 -r 50000 -t 2,10000 -u ' \
-    #            f'{self.gfa0} > {self.gfa0}.clean'
-    #     stdout, stderr = execute(comm)
-    #     return True
-
-
-
-
-
-
-    def single_links(self, seqpool):
-        # ensure that we only keep one edge if there are multiple
-        logging.info("single links")
-        occupied = set()
-        for node, edge_dict in list(self.ava_dict.items()):
-            # loop over both sides of node
-            # each side has its own ava_dict containing possible edges
-            for side, avas in edge_dict.items():
-                # if there are no edges on a side, skip
-                if len(avas) == 0:
-                    continue
-                # otherwise, we have link and need to check which one to keep
-                else:
-                    # reduce to only non-occupied targets
-                    avas = self.check_occupancy(avas=avas, occupied=occupied)
-                    # if specified, check other filters
-                    # e.g. tetramer freq. dist.
-                    # if self.tetra:
-                    #     avas = self.check_tetramer_dist(avas=avas, seqpool=seqpool, node=node)
-                    # if there are no targets left
-                    if not avas:
-                        self.ava_dict[node][side] = {}
-                        continue
-                    # after filtering choose the link we retain
-                    # using some characteristic, i.e. largest resulting sequence
-                    # other options: alignment_block_length ..
-                    metric = [rec.qlen + rec.tlen for rec in avas.values()]
-                    # metric = [rec.alignment_block_length for rec in avas.values()]
-                    targets = list(avas.keys())
-                    max_idx = np.argmax(metric)
-                    chosen_t, chosen_t_side = targets[max_idx]
-                    rec = avas[(chosen_t, chosen_t_side)]
-                    # for the chosen one, put into place
-                    self.ava_dict[node][side] = {(chosen_t, chosen_t_side): rec}
-                    # also eliminate reciprocal edge
-                    self.ava_dict[chosen_t][chosen_t_side] = {}
-                    # mark both as occupied
-                    occupied.add((node, side))
-                    occupied.add((chosen_t, chosen_t_side))
-
-
     def check_occupancy(self, avas, occupied):
         # check whether targets of some node are already occupied
         not_occ = {(tname, tside): rec for (tname, tside), rec in avas.items()
                    if (tname, tside) not in occupied}
         return not_occ
 
-
-    # TODO depr
-    # def check_tetramer_dist(self, avas, seqpool, node):
-    #     # check whether an edge fulfills some tetramer dist metric
-    #     eligible = {(tname, tside): rec for (tname, tside), rec in avas.items()
-    #                 if seqpool.is_intra(node, tname)}
-    #     return eligible
-
-
-    def ava_dict2ava_file(self, paf_out):
-        # after making single links, write the alignments to file
-        written_lines = set()
-        with open(paf_out, 'w') as fh:
-            # indexing ava_dict returns node, dict for each end
-            for node, edge_dict in self.ava_dict.items():
-                for side, avas in edge_dict.items():
-                    # no overlaps on the end of this node
-                    if not avas:
-                        continue
-                    # grab next target - this requires that there is only 1 overlap
-                    _, rec = next(iter(avas.items()))
-                    # exact overlap was already written (reciprocal)
-                    if rec.line in written_lines:
-                        continue
-                    else:
-                        fh.write(rec.line)
-                        written_lines.add(rec.line)
-
-
-    def ava2paf(self, paf_out):
-        # write all overlaps to a paf file
-        # different to method above: allows multiple links
-        written_lines = set()
-        with open(paf_out, 'w') as fh:
-            # indexing ava_dict returns node, dict for each end
-            for node, edge_dict in self.ava_dict.items():
-                for side, avas in edge_dict.items():
-                    # no overlaps on the end of this node
-                    if not avas:
-                        continue
-                    # grab next target - this requires that there is only 1 overlap
-                    for ava, rec in avas.items():
-                        # overlap was already written
-                        if rec.line in written_lines:
-                            continue
-                        else:
-                            fh.write(rec.line)
-                            written_lines.add(rec.line)
 
 
     def links2paf(self, paf_out):
@@ -353,11 +183,6 @@ class SequenceAVA:
             logging.info(f"stderr: \n {stderr}")
         return True
 
-
-    # def links2gfa(self):
-    #     TODO depr?
-        # self.links2paf(paf_out=self.paf0)
-        # self.paf2gfa_fpa(paf_in=self.paf0, gfa_out=self.gfa0)
 
 
     def paf2gfa_gfatools(self, paf, fa, gfa=None):
