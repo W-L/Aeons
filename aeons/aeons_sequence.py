@@ -53,6 +53,7 @@ class SequenceAVA:
         containments = {}  # collect, used for coverage increments
         overlappers = set()  # used to track temperature of sequences
         ovl = 0
+        inter = 0
 
         records, skip = Paf.parse_filter_classify_records(paf=paf, filters=self.filters)
 
@@ -68,6 +69,7 @@ class SequenceAVA:
                 if self.tetra:
                     intra = seqpool.is_intra(rec.qname, rec.tname)
                     if not intra:
+                        inter += 1
                         continue
 
                 # append the alignment to both the query and the target
@@ -83,7 +85,7 @@ class SequenceAVA:
             else:
                 pass
 
-        logging.info(f"ava load: skip {skip}, cont {len(containments.keys())} ovl: {ovl}")
+        logging.info(f"ava load: skip {skip}, cont {len(containments.keys())} ovl: {ovl} inter: {inter}")
         return containments, overlappers
 
 
