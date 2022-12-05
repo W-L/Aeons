@@ -76,6 +76,12 @@ class SequenceAVA:
                 ovl += 1
                 self.overlaps[(rec.qname, rec.tname)] = rec
                 # TODO new
+                if rec.tname in self.links[rec.qname].keys():
+                    if rec.s1 < self.links[rec.qname][rec.tname].s1:
+                        # we already have an overlap between the two
+                        # and the previous recorded one had higher s1
+                        continue
+
                 self.links[rec.qname][rec.tname] = rec
                 self.links[rec.tname][rec.qname] = rec
                 overlappers.add(rec.qname)
@@ -415,6 +421,9 @@ class SequencePool:
     def load_dependencies(self):
         self.dep = Dependencies()
 
+
+    def headers(self):
+        return set(self.sequences.keys())
 
 
     def seqdict(self):
