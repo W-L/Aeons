@@ -95,6 +95,10 @@ class PafLine:
             c = 2
         elif self._second_contained():
             c = 3
+        elif self._first_contained_fallback():
+            c = 2
+        elif self._second_contained_fallback():
+            c = 3
         else:
             pass
 
@@ -152,7 +156,7 @@ class PafLine:
 
     def _first_contained_fallback(self):
         qcov = self.qend - self.qstart
-        if (qcov / self.qlen) > 0.9:
+        if (qcov / self.qlen) >= 0.95:
             return True
         else:
             return False
@@ -160,7 +164,7 @@ class PafLine:
 
     def _second_contained_fallback(self):
         tcov = self.tend - self.tstart
-        if (tcov / self.tlen) > 0.9:
+        if (tcov / self.tlen) >= 0.95:
             return True
         else:
             return False
