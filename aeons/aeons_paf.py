@@ -490,14 +490,14 @@ class Paf:
         # parse a paf file by converting each line to Paf object
         # filtering and classifying mappings
         records = []
-        skip = 0
+        skip = []
         with open(paf, 'r') as fh:
             for record in fh:
                 rec = PafLine(record)
                 # check if this mapping passes the filters
                 is_filtered = rec.filter(filters=filters)
                 if is_filtered:
-                    skip += 1
+                    # skip += 1
                     continue
 
                 # classify the alignment
@@ -505,7 +505,7 @@ class Paf:
 
                 if rec.c == 1:
                     # internal match
-                    skip += 1
+                    skip.append(rec)
                     continue
                 # if not filtered or skipped
                 records.append(rec)
