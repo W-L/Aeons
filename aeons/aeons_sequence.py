@@ -605,16 +605,16 @@ class SequencePool:
     def get_next_increment_edges(self, edges, previous_edges=None):
         # if no argument given, get the edges with in-degree of 0
         if not previous_edges:
-            sources, targets = zip(*edges.keys())
+            sources, targets = zip(*edges)
             next_sources = set(sources) - set(targets)
         # otherwise grab the edges starting at the previous targets
         else:
-            next_sources = [t for (s, t) in previous_edges.keys()]
+            next_sources = [t for (s, t) in previous_edges]
         # get the next edges to increment
-        next_edges = {(s, t): edge for (s, t), edge in edges.items() if s in next_sources}
+        next_edges = {(s, t) for (s, t) in edges if s in next_sources}
         # remove the next edges
         for e in next_edges:
-            edges.pop(e)
+            edges.remove(e)
         return edges, next_edges
 
 
@@ -649,22 +649,18 @@ class SequencePool:
             self.sequences[target].atoms.add(source)
 
 
-
     def increment(self, containment):
         # use the records of containment to increase the coverage counts & borders
         # containment = (contained, container) : rec
-        edges = deepcopy(containment)
+        edges = set(containment.keys())
         # if there are no increments to do
         if not edges:
             return []
 
-        # gtg = gt.Graph(directed=True)
-        # node_names = gtg.add_edge_list(edges, hashed=True, hash_type="string")
-        # gtg.vp["names"] = node_names
-        # graph = gtg
-        # c = graph.degree_property_map("in")
-        # c = c.copy("float")
-        # graph_draw(graph, vertex_fill_color=c, vcmap=cm.gist_heat, vorder=c, vertex_text=c, output="containment.pdf")
+        # import sys
+        # sys.path.insert(0, "/home/lukas/Desktop/Aeons/code/plot")
+        # from gt_plot import containment_graph
+        # containment_graph(edges, 0)
         # dist = gt.topology.shortest_distance(graph)
         # for d in dist:
         #     d = np.array(d)
@@ -673,15 +669,21 @@ class SequencePool:
         # get the first edges to increment, i.e. those with 0 in-degree
         edges, next_edges = self.get_next_increment_edges(edges, previous_edges=None)
         # affect the increments
-        for (source, target), rec in next_edges.items():
+        for (source, target) in next_edges:
+            rec = containment[(source, target)]
             self.affect_increment(source, target, rec)
         previous_edges = next_edges
 
         while len(edges) > 0:
             # get the next edges to deal with
             edges, next_edges = self.get_next_increment_edges(edges, previous_edges=previous_edges)
-            for (source, target), rec in next_edges.items():
+            for (source, target) in next_edges:
+                rec = containment[(source, target)]
                 self.affect_increment(source, target, rec)
+
+            if len(next_edges) == len(previous_edges):
+                # circular containment relationship can trap us here
+                break
             previous_edges = next_edges
 
         # for removal: return the ids of the contained sequences
