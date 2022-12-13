@@ -91,7 +91,14 @@ class SequenceAVA:
             else:
                 pass
 
-        logging.info(f"ava load: skip {skip}, cont {len(containments.keys())} ovl: {ovl} inter: {inter}")
+        contained_ids = set([i for (i, j) in containments.keys()])
+        # remove contained ones from further containment search
+        skip_filt = [s for s in skip if s.qname not in contained_ids and s.tname not in contained_ids]
+        # run multiline containment detection
+        mc = MultilineContainments(records=skip_filt)
+        containments.update(mc.containments)
+
+        logging.info(f"ava load: skip {len(skip)}, cont {len(contained_ids)} cont multi:")# {len(mc.containments)} ovl: {ovl} inter: {inter}")
         return containments, overlappers
 
 
@@ -1142,6 +1149,114 @@ class CoverageMerger:
             arr_parts.append(atom_arr)
             cpos = a['pos']
         return np.concatenate(arr_parts)
+
+
+
+
+class MultilineContainments:
+
+
+    def __init__(self, records):
+        # records is a list of PafLine objects
+        self.records = records
+        # collect all partners with multiple mappings
+        multidict = self._fill_multidict()
+        # get a dict of (contained, container): [recs]
+        containments = self._get_multiline_containments(multidict=multidict)
+        self.containments = containments
+
+
+    def _fill_multidict(self):
+        multidict = defaultdict(list)
+        for rec in self.records:
+            multidict[rec.keygen()].append(rec)
+        multidict = {k: recs for k, recs in multidict.items() if len(recs) > 1}
+        return multidict
+
+
+    def _get_multiline_containments(self, multidict):
+        # check for containment from multiple internal match mappings
+        containments = {}
+
+        for k, recs in multidict.items():
+            cont = self.multiline_containment(recs)
+            if cont:
+                containments.update(cont)
+        return containments
+
+
+    @staticmethod
+    def multiline_containment(records, n=100):
+        qlen = records[0].qlen // n
+        tlen = records[0].tlen // n
+        qarr = np.zeros(shape=qlen , dtype="bool")
+        tarr = np.zeros(shape=tlen , dtype="bool")
+
+        if len(records) > 10:
+            return False
+
+        for r in records:
+            qarr[r.qstart // n: r.qend // n] = 1
+            tarr[r.tstart // n: r.tend // n] = 1
+
+        # if more than 0.9 are covered by mappings
+        if sum(qarr) > qlen * 0.9:
+            # if overhang is smaller than 0.15 of len
+            q_low, q_high = np.nonzero(qarr)[0][[0, -1]]
+            if (q_high - q_low) > qlen * 0.85:
+                # return containment tuple
+                t_low, t_high = np.nonzero(tarr)[0][[0, -1]]
+                ctd_low, ctd_high, ctr_low, ctr_high = q_low, q_high, t_low, t_high
+                cont = MultilineContainments.generate_paf_cont(
+                    records, 'q', 't', ctd_low, ctd_high, ctr_low, ctr_high, n
+                )
+                return cont
+
+        if sum(tarr) > tlen * 0.9:
+            t_low, t_high = np.nonzero(tarr)[0][[0, -1]]
+            if (t_high - t_low) > tlen * 0.85:
+                q_low, q_high = np.nonzero(qarr)[0][[0, -1]]
+                ctd_low, ctd_high, ctr_low, ctr_high = t_low, t_high, q_low, q_high
+                cont = MultilineContainments.generate_paf_cont(
+                    records, 't', 'q', ctd_low, ctd_high, ctr_low, ctr_high, n
+                )
+                return cont
+
+        # if neither q or t are contained
+        return False
+
+
+    @staticmethod
+    def generate_paf_cont(records, ctd, ctr, ctd_low, ctd_high, ctr_low, ctr_high, n):
+        # given a list of records that make up a multic
+        # generate some paf that describes the containment
+        # so that we can use it for incrementing
+        ctd_name = getattr(records[0], f'{ctd}name')
+        ctr_name = getattr(records[0], f'{ctr}name')
+        ctd_len = getattr(records[0], f'{ctd}len')
+        ctr_len = getattr(records[0], f'{ctr}len')
+        # use maximum span
+        ctd_span = ctd_high - ctd_low
+        ctr_span = ctr_high - ctr_low
+        # except if span on container longer than 2.2x of contained
+        if ctr_span > 2.2 * ctd_span:
+            r = 0
+            maplen = 0
+            for i in range(len(records)):
+                # then use the longest alignment between the two
+                if records[i].maplen > maplen:
+                    maplen = records[i].maplen
+                    r = i
+            ctr_low = getattr(records[r], f'{ctr}start') // n
+            ctr_high = getattr(records[r], f'{ctr}end') // n
+        # generate paf entry
+        paf = f'{ctd_name}\t{ctd_len}\t{ctd_low * n}\t{ctd_high * n}\t+' \
+              f'\t{ctr_name}\t{ctr_len}\t{ctr_low * n}\t{ctr_high * n}\t0\t0\t0'
+        rec = PafLine(paf)
+        # mark as first contained
+        rec.c = 2
+        return {(ctd_name, ctr_name): rec}
+
 
 
 
