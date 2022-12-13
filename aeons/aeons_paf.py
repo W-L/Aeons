@@ -356,8 +356,15 @@ class PafLine:
         return ostart, oend, olen, cstart, cend, clen
 
 
+    def keygen(self):
+        if self.qname < self.tname:
+            return f'{self.qname}-{self.tname}'
+        else:
+            return f'{self.tname}-{self.qname}'
 
-    def plot(self):
+
+
+    def plot(self, save=None):
         import plotnine as p9
         import pandas as pd
         # this puts together the coordinates for the polygon
@@ -405,8 +412,12 @@ class PafLine:
              p9.xlab("") +
              p9.theme_minimal() +
              p9.theme(axis_text_y=p9.element_blank(),
-                      axis_ticks_major_y=p9.element_blank()))
-        return p
+                      axis_ticks_major_y=p9.element_blank(),
+                      plot_background=p9.element_rect(fill="white", color="white")))
+        if save:
+            p.save(save)
+        else:
+            return p
 
 
     # def find_side(self, lim=0.1):
