@@ -365,7 +365,8 @@ class Sequence:
     def find_low_cov(self, n, lim):
         # find where the coverage is too low
         cc = self.cov_chunked
-        lc = np.where(cc < lim * n)[0]
+        dropout_lim = find_dropout_threshold(cc)
+        lc = np.where((cc > dropout_lim * n) & (cc < lim * n))[0]
         # filter single windows of low coverage
         # using the difference between adjacent indices of lowcov windows
         # EXCLUDING blocks of coverage 1
@@ -1273,3 +1274,31 @@ def roll_boolean_array(arr, steps, direction):
     for i in range(steps):
         arr += np.roll(arr, d)
     return arr
+
+
+
+
+def find_dropout_threshold(coverage, mod=800):
+    '''
+    If there are sites that have not had much coverage after some time
+    we don't expect them to gain much after that and want to ignore them
+
+    Parameters
+    ----------
+    coverage: np.array
+        coverage depth at each position
+    mod: int
+        threshold modifier
+
+    Returns
+    -------
+    dropout: np.array
+        array of positions that will most likely not get much more coverage
+
+    '''
+    cov_mean = np.mean(coverage)
+    # ignore threshold is dependent on mean coverage
+    threshold = int(cov_mean / mod)
+    # dropout = np.where(coverage <= threshold)[0]
+    return threshold
+
