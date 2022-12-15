@@ -258,7 +258,7 @@ class AeonsRun:
             for header, seq in read_fa(contigs):
                 header = str(header)
                 header = header.replace('>', '')
-                header = header.replace('_', '-')
+                # header = header.replace('_', '-')  # TODO why did we do this?
                 prebuilt[header] = seq
 
         # save the source file name for the contigs (for polishing)
