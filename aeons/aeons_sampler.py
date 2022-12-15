@@ -5,6 +5,8 @@ import os
 import time
 import mmap
 import gzip
+import pickle
+import random
 
 # non-std lib
 import numpy as np
@@ -326,3 +328,182 @@ class FastqStream_mmap:
         # in simulation runs before using any data
         read_lengths, _, _, _= self._get_batch(delete=False)
         return read_lengths
+
+
+
+
+
+class PairedEnd_mmap:
+    """
+    Random sampling from paired-end illumina reads
+    """
+    def __init__(self, source1, source2, batchsize=10):
+        self.source1 = source1  # path to file-like object
+        self.source2 = source2  # path to file-like object
+        self.batchsize = batchsize
+
+        self.log_each = int(int(1e5))  # defining logging frequency of scanning for offsets
+        # scan the offsets if the file does not exist
+        if not os.path.exists(f'{source1}.offsets'):
+            logging.info("scanning offsets")
+            self._scan_offsets(source=source1)
+            self._scan_offsets(source=source2)
+
+        logging.info("loading offsets")
+        self.offsets1 = self._load_offsets(f'{source1}.offsets')
+        self.offsets2 = self._load_offsets(f'{source2}.offsets')
+        self.batch = 0
+
+
+
+    def _scan_offsets(self, source, k=4, limit=1e9):
+        """
+        Scan file to find byte offsets. Offsets are created for chunks of k lines each (4 for fastq)
+        """
+        tic = time.time()
+        tmp_offsets = dict()
+        read_num = 0
+
+        with open(source, 'rb') as f:
+            k_tmp = 1
+            # memory-map the file; lazy eval-on-demand via POSIX filesystem
+            mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+
+            for line in iter(mm.readline, b''):
+                if k_tmp % k == 0:
+                    pos = mm.tell()
+                    header = prev_line.split()[0]
+                    tmp_offsets[header] = pos
+                    k_tmp = 1
+                    read_num += 1
+                    # status update in case there are many reads
+                    if read_num % self.log_each == 0:
+                        logging.info(f"{read_num} reads scanned")
+                else:
+                    k_tmp += 1
+                    prev_line = line
+
+                if read_num >= limit:
+                    break
+
+        toc = time.time()
+
+
+        # write the offsets to a file
+        outfile = f'{source}.offsets'
+        with open(outfile, 'wb') as p:
+            pickle.dump(tmp_offsets, p)
+        logging.info(f"DONE scanning {read_num} reads")
+        logging.info(f'wrote {len(tmp_offsets)} offsets to {source}.offsets')
+        logging.info(f"{round(toc - tic, 4)} seconds elapsed scanning file for offsets")
+        return outfile
+
+
+
+    def _load_offsets(self, offset_file):
+        with open(offset_file, "rb") as p:
+            offsets = pickle.load(p)
+        print(f"loaded offsets for {offset_file}")
+        logging.info(f"available reads: {len(offsets)}")
+        return offsets
+
+
+    def _sample_read_ids(self, delete=True):
+        # grab some number of random ids
+        read_ids = self.offsets1.keys()
+        if not read_ids:
+            print("no more reads left to sample")
+            exit(1)
+        random_ids = random.sample(read_ids, self.batchsize)
+        batch_offsets1 = [self.offsets1[i] for i in random_ids]
+        batch_offsets2 = [self.offsets2[i] for i in random_ids]
+        if delete:
+            for r in random_ids:
+                del self.offsets1[r]
+                del self.offsets2[r]
+        return batch_offsets1, batch_offsets2
+
+
+    def get_batch(self):
+        # sample some ids
+        offsets1, offsets2 = self._sample_read_ids()
+        # grab reads from file1
+        batch1 = self._grab_reads(source=self.source1, offsets=offsets1)
+        batch2 = self._grab_reads(source=self.source2, offsets=offsets2)
+        return batch1, batch2
+
+
+
+
+    def _grab_reads(self, source, offsets):
+        """
+        return a batch of reads from the fastq file
+        """
+        with open(source, 'rb') as f:
+            mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+            # initialise list instead of string concat
+            batch = [''] * len(offsets)
+
+            for i in range(len(offsets)):
+                try:
+                    # here's the magic. Use the offset to jump to the position in the file
+                    # then return the next 4 lines, i.e. one read
+                    chunk = self._get_single_read(mm=mm, offset=offsets[i])
+                    # append the fastq entry to the batch
+                    batch[i] = chunk
+                except:
+                    logging.info(f"Error at location: {offsets[i]}")
+                    continue
+                if len(chunk) == 0:
+                    continue
+
+            # add call to close memory map, only file itself is under with()
+            mm.close()
+
+        if not batch[0].startswith('@') and not batch[0].startswith('>'):
+            logging.info("The batch is broken")
+
+        # parse the batch, which is just a long string into dicts
+        batch_string = ''.join(batch)
+        return batch_string
+
+
+
+    def _get_single_read(self, mm, offset):
+        # return 4 lines from a memory-mapped fastq file given a byte wise position
+        mm.seek(offset)
+        chunk_size = 4
+        chunk = b''
+        # read the 4 lines of the fastq entry
+        for _ in range(chunk_size):
+            chunk += mm.readline()
+
+        chunk = chunk.decode("utf-8")
+        return chunk
+
+
+
+    def count_sampled_bases(self, batch_string):
+        # take a batch in string format and parse it into some containers. Imitates reading from an actual fq
+        read_lengths = {}
+
+        batch_lines = batch_string.split('\n')
+        n_lines = len(batch_lines)
+
+        i = 0
+        # since we increment i by 4 (lines for read in fq), loop until n_lines - 4
+        while i < (n_lines - 4):
+            # grab the name of the read. split on space, take first element, trim the @
+            desc = batch_lines[i].split(' ')
+            name = str(desc[0][1:])
+            source = str(desc[-1])
+            seq = batch_lines[i + 1]
+            read_len = len(seq)
+            # update the containers
+            read_lengths[name] = read_len
+            i += 4
+        # get the total length of reads in this batch
+        total_bases = np.sum(np.array(list(read_lengths.values())))
+        return total_bases
+
+
