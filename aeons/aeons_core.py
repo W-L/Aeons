@@ -343,6 +343,12 @@ class AeonsRun:
         # if nothing mapped, just return. Unmapped = accept
         if len(paf_dict.items()) == 0:
             logging.info("nothing mapped")
+            self.reject_count = 0
+            self.accept_count = 0
+            self.unmapped_count = 0
+            self.reject_ids = set()
+            self.accept_ids = set()
+            self.unmapped_ids = set()
             return read_sequences
 
         reads_decision = dict()
