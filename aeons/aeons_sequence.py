@@ -1,7 +1,7 @@
 import logging
 import os
 import sys
-from collections import defaultdict
+from collections import defaultdict, Counter
 from copy import deepcopy
 from pathlib import Path
 
@@ -98,7 +98,7 @@ class SequenceAVA:
         mc = MultilineContainments(records=skip_filt)
         containments.update(mc.containments)
 
-        logging.info(f"ava load: skip {len(skip)}, cont {len(contained_ids)} cont multi:")# {len(mc.containments)} ovl: {ovl} inter: {inter}")
+        logging.info(f"ava load: skip {len(skip)}, cont {len(contained_ids)} cont multi: {len(mc.containments)} ovl: {ovl} inter: {inter}")
         return containments, overlappers
 
 
@@ -245,7 +245,7 @@ class Sequence:
         self.seq = seq
 
         if cov is None:
-            self.cov = np.ones(shape=len(seq), dtype='uint16')
+            self.cov = np.ones(shape=len(seq), dtype='float')
         else:
             self.cov = cov
 
@@ -439,6 +439,18 @@ class SequencePool:
         return {header: seqo.seq for header, seqo in self.sequences.items()}
 
 
+    def count_coverage(self):
+        # check the coverage of all sequences in the pool
+        cov_counts = np.zeros(shape=1000)
+        for header, seqo in self.sequences.items():
+            seqo_counts = np.bincount(seqo.cov.astype('int'))
+            print(header)
+            print(seqo_counts)
+            cov_counts[:seqo_counts.shape[0]] += seqo_counts
+        cov_counts_t = np.trim_zeros(cov_counts, trim='b')
+        return cov_counts_t
+
+
     def ingest(self, seqs):
         # add a pile of sequences to the pool
         # can read from a dict, or add an existing pool
@@ -618,12 +630,12 @@ class SequencePool:
         return edges, next_edges
 
 
-    def affect_increment(self, source, target, rec):
+    def affect_increment(self, source, target, rec, edge_multiplicity):
         # relevant coordinates of this containment
         ostart, oend, olen, cstart, cend, clen = rec.grab_increment_coords()
 
         # grab the source coverage
-        cont_cov = self.sequences[source].cov[cstart: cend]
+        cont_cov = self.sequences[source].cov[cstart: cend].copy()
 
         # adjust length of coverage array
         if clen == olen:
@@ -639,6 +651,9 @@ class SequencePool:
         else:
             pass
 
+        # adjust for edge multiplicity
+        cont_cov /= edge_multiplicity
+
         # add the source coverage to target coverage
         self.sequences[target].cov[ostart: oend] += cont_cov
         # limit coverage to 100 to prevent mess
@@ -649,6 +664,22 @@ class SequencePool:
             self.sequences[target].atoms.add(source)
 
 
+    def affect_increments(self, next_edges, containment, edge_multiplicity):
+        # loop over the next set of edges to affect the collected increments
+        for (source, target) in next_edges:
+            rec = containment[(source, target)]
+            # grab edge multiplicity modifier, in case of parallel edges
+            em = edge_multiplicity[source]
+            self.affect_increment(source, target, rec, em)
+
+
+    @staticmethod
+    def find_edge_multiplicity(edges):
+        sources, targets = zip(*edges)
+        source_counts = Counter(sources)
+        return source_counts
+
+
     def increment(self, containment):
         # use the records of containment to increase the coverage counts & borders
         # containment = (contained, container) : rec
@@ -657,37 +688,31 @@ class SequencePool:
         if not edges:
             return []
 
+        # debugging
         # import sys
         # sys.path.insert(0, "/home/lukas/Desktop/Aeons/code/plot")
         # from gt_plot import containment_graph
         # containment_graph(edges, 0)
-        # dist = gt.topology.shortest_distance(graph)
-        # for d in dist:
-        #     d = np.array(d)
-        #     print(d[np.where(d != 2147483647)[0]])
 
         # get the first edges to increment, i.e. those with 0 in-degree
         edges, next_edges = self.get_next_increment_edges(edges, previous_edges=None)
-        # affect the increments
-        for (source, target) in next_edges:
-            rec = containment[(source, target)]
-            self.affect_increment(source, target, rec)
+        edge_multiplicity = self.find_edge_multiplicity(next_edges)
+        self.affect_increments(next_edges, containment, edge_multiplicity)
         previous_edges = next_edges
 
         while len(edges) > 0:
             # get the next edges to deal with
             edges, next_edges = self.get_next_increment_edges(edges, previous_edges=previous_edges)
-            for (source, target) in next_edges:
-                rec = containment[(source, target)]
-                self.affect_increment(source, target, rec)
+            edge_multiplicity = self.find_edge_multiplicity(next_edges)
+            self.affect_increments(next_edges, containment, edge_multiplicity)
 
+            # circular containment relationships can trap us here
             if len(next_edges) == len(previous_edges):
-                # circular containment relationship can trap us here
                 break
             previous_edges = next_edges
 
         # for removal: return the ids of the contained sequences
-        contained_ids = [s for (s, t) in containment.keys()]
+        contained_ids = set([s for (s, t) in containment.keys()])
         return contained_ids
 
 
