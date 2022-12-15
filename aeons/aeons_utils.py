@@ -379,7 +379,7 @@ def launch_post_snake(configfile, run_name):
     comm = f'bsub -q short -M 4G -n 1 -o snake00.out -e snake00.err ' \
            f'"snakemake ' \
            f'-s /nfs/research/goldman/lukasw/aeons/code/snakesembly/snakesembly_post.smk ' \
-           f'--profile lsf_short ' \
+           f'--profile lsf_short3 ' \
            f'--configfile {configfile} ' \
            f'--config dumps={dumps} run_name={run_name} "'
 
