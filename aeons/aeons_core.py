@@ -1,11 +1,11 @@
 # CUSTOM
 from .aeons_const import Constants, Filters
 from .aeons_utils import execute, random_id, empty_file,\
-    init_logger, read_fa, readfq, MyArgumentParser, spawn, redotable
-from .aeons_sampler import FastqStream_mmap
+    init_logger, read_fa, readfq, MyArgumentParser # , spawn, redotable
+from .aeons_sampler import FastqStream_mmap # , OverlapSampler
 from .aeons_readlengthdist import ReadlengthDist
 from .aeons_paf import Paf, choose_best_mapper
-from .aeons_mapper import LinearMapper, ValidationMapping
+from .aeons_mapper import LinearMapper # , ValidationMapping
 from .aeons_sequence import SequencePool, SequenceAVA, UnitigPool, ContigPool
 from .aeons_repeats import RepeatFilter2
 
@@ -60,7 +60,7 @@ class AeonsRun:
         self.name = args.name
 
         self.read_sources = dict()
-        # initial strategy is accept
+        # initial strategy is to accept
         self.strat = 1
         # for plotting afterwards, we keep a list of rows
         self.metrics = defaultdict(list)
@@ -118,6 +118,12 @@ class AeonsRun:
                                            maxbatch=self.args.maxb, seed=self.args.seed)
             # self.stream = FastqStream(source=self.args.fq, bsize=self.args.bsize,
             #                           seed=self.args.seed, workers=self.args.workers)
+
+            # if self.args.ovl:
+            #     sampler_paf = f'{self.args.fq}.paf'
+            #     self.overlapDB = OverlapSampler(paf=sampler_paf)
+            #     self.sample_pool = SequencePool(name=f'{args.name}.sample', min_len=self.filt.min_seq_len, out_dir=f'{args.out_dir}_sample')
+            #     self.sample_pool.load_dependencies()
 
             # load a mapper for some reference
             # used to validate mergers in testing
@@ -293,7 +299,7 @@ class AeonsRun:
         # write pool to file
         SequencePool.write_seq_dict(seq_dict=self.pool.seqdict(), file=self.pool.fa)
         # create gfa and unitigs
-        gfa = self.ava.paf2gfa_gfatools(paf=self.ava.paf_links, fa=self.pool.fa)
+        gfa = self.ava.paf2gfa_gfatools(paf=self.ava.paf_links, fa=self.pool.fa, gfa="dbg.gfa")
         # load the new unitigs
         unitigs = SequencePool.load_unitigs(gfa=gfa)
         # put them into a collection
@@ -390,7 +396,7 @@ class AeonsRun:
                 reject_count += 1
                 reject_ids.add(rec.qname)
 
-            # append the read's sequence to a new dictionary of the batch after decision making
+            # append the read's sequence to a new dictionary of the batch after decision-making
             reads_decision[rec.qname] = record_seq
 
         # all unmapped reads also need to be accepted, i.e. added back into the dict
@@ -457,7 +463,7 @@ class AeonsRun:
         try:
             execute(f"cp {previous_filename} {filename}")
         except FileNotFoundError:
-            # at the first batch, create empty 0th and copy to 1st
+            # at the first batch, create empty 0th and copy to 1st file
             # to make sure we don't append to the same file multiple times
             # otherwise we have duplicate reads and that causes flye to crash
             empty_file(previous_filename)
@@ -620,7 +626,7 @@ class AeonsRun:
 
 
     def strat_csv(self, strat, node2pos):
-        # write the strategy to csv file so it can be displayed in bandage
+        # write the strategy to csv file, so it can be displayed in bandage
         csv_file = f'{self.args.name}.strat.csv'
         header = ','.join(["node", "Color"])
         with open(csv_file, 'w') as csv:
@@ -644,7 +650,6 @@ class AeonsRun:
         # wrapper to remove sequences from pool, ava, coverage etc.
         if not sequences:
             return
-
         self.ava.remove_links(sequences=sequences)
         self.pool.remove_sequences(sequences=sequences)
 
@@ -859,7 +864,7 @@ class AeonsRun:
         # collect metrics
         # self.collect_metrics()   # TODO do we want any?
 
-        # end bit for timing next scan
+        # final bit for timing next scan
         toc = time.time()
         passed = toc - tic
         next_update = int(self.args.wait - passed)
@@ -888,7 +893,7 @@ class AeonsRun:
         #  -------------------------------- POST DECISIONS
         logging.info("")
 
-        if self.batch % 20 == 0:
+        if self.batch % 5 == 0:
             print("breakpoint")
 
         # filter sequences with repeats at the end
@@ -1037,7 +1042,7 @@ class Readfish:
                 reject_count += 1
                 reject_ids.add(rec.qname)
 
-            # append the read's sequence to a new dictionary of the batch after decision making
+            # append the read's sequence to a new dictionary of the batch after decision-making
             reads_decision[rec.qname] = record_seq
 
         # all unmapped reads also need to be accepted, i.e. added back into the dict
@@ -1072,7 +1077,8 @@ class LiveRun:
         channel_path = f'{out_path}/channels.toml'
         logging.info(f'looking for channels specification at : {channel_path}')
         channels_found = False
-        while channels_found == False:
+        channels = []
+        while not channels_found:
             if not os.path.isfile(channel_path):
                 logging.info("channels file does not exist (yet), waiting for 30s")
                 time.sleep(30)
@@ -1230,7 +1236,7 @@ class FastqBatch:
         logging.info(f"reading file: {fastq_file}")
         read_sequences = {}
 
-        # to make sure its a path object, not a string
+        # to make sure it's a path object, not a string
         if type(fastq_file) is str:
             fastq_file = Path(fastq_file)
 
