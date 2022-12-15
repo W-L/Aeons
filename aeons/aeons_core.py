@@ -270,7 +270,7 @@ class AeonsRun:
         # i.e. if we want to focus on component ends, not on covering everything all over again
         oz = 10000  # allow overlap zone of this size
         for header, seqo in contig_pool.sequences.items():
-            seqo.cov[oz: -oz] = self.args.lowcov + 1
+            seqo.cov[oz: -oz] = self.args.preload_cov
         # add to general pool
         self.pool.ingest(seqs=contig_pool)
 
@@ -1285,6 +1285,7 @@ def setup_parser():
     parser.add_argument('--bsize', dest='bsize', type=int, default=4000, help='num reads per batch')                                                    # OPT
     parser.add_argument('--lowcov', dest='lowcov', type=int, default=10, help='limit for strategy rejection')                                           # OPT
     parser.add_argument('--preload', dest='preload', type=str, default=None, help='path to fasta for pre-loading sequences')                            # OPT
+    parser.add_argument('--preload_cov', dest='preload_cov', type=int, default=11, help='how much coverage to assign to preloaded seqs')                # OPT
     parser.add_argument('--tetra', dest='tetra', type=int, default=0, help='adds a test for tetramer freq dist before overlapping')                     # OPT
     parser.add_argument('--polish', dest='polish', type=int, default=0, help='whether to run contig polishing (not for scaffold mode)')                 # OPT
     parser.add_argument('--filter_repeats', dest='filter_repeats', type=int, default=0, help='whether to run repeat filtering')                         # OPT
