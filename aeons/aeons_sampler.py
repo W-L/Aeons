@@ -8,7 +8,6 @@ import gzip
 import pickle
 import random
 
-# non-std lib
 import numpy as np
 
 """
@@ -313,7 +312,7 @@ class FastqStream_mmap:
 
 
     def _get_single_read(self, mm, offset):
-        # return 4 lines from a memory-mapped fastq file given a byte-wise position
+        # return 4 lines from a memory-mapped fastq file given a byte wise position
         mm.seek(offset)
         chunk_size = 4
         chunk = b''
@@ -329,7 +328,7 @@ class FastqStream_mmap:
         # this is to look into a batch without actually using it
         # this way we can have a first idea about the read length dist
         # in simulation runs before using any data
-        read_lengths, _, _, _= self._get_batch(delete=False)
+        read_lengths, _, _, _ = self._get_batch(delete=False)
         return read_lengths
 
 
