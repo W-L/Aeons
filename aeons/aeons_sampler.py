@@ -247,7 +247,6 @@ class FastqStream_mmap:
         """
         return a batch of reads from the fastq file
         """
-        batch = ''
         # check if offsets are empty
         if self.offsets.shape[0] == 0:
             logging.info("no more batches left")
@@ -262,6 +261,9 @@ class FastqStream_mmap:
             # the first row of the offsets are the next batch
             batch_offsets = self.offsets[0, :]
 
+            # initialise list instead of string concat
+            batch = [''] * len(batch_offsets)
+
             # this is probably LINUX specific and not POSIX
             # here we tell the kernel what to do with the mapped memory
             # we tell it to preload specific "pages" of the file into memory
@@ -269,7 +271,7 @@ class FastqStream_mmap:
             # pagesize is a LINUX (system)-specific constant of 4096 bytes per "page"
             pagesize = 4096 #
             # the start of WILLNEED needs to be a multiple of pagesize
-            # so we take the modulo and move the start of the offset a little bit earlier if needed
+            # we take the modulo and move the start of the offset a bit earlier if needed
             new_offsets = batch_offsets - (batch_offsets % pagesize)
 
             for new_offset in new_offsets:
@@ -280,15 +282,15 @@ class FastqStream_mmap:
 
             # offset = batch_offsets[0]
             batch_offsets = np.sort(batch_offsets)
-            for offset in batch_offsets:
+            for i in range(len(batch_offsets)):
                 try:
                     # here's the magic. Use the offset to jump to the position in the file
                     # then return the next 4 lines, i.e. one read
-                    chunk = self._get_single_read(mm=mm, offset=offset)
+                    chunk = self._get_single_read(mm=mm, offset=batch_offsets[i])
                     # append the fastq entry to the batch
-                    batch += chunk
+                    batch[i] = chunk
                 except:
-                    logging.info(f"Error at location: {offset}")
+                    logging.info(f"Error at location: {batch_offsets[i]}")
                     continue
                 if len(chunk) == 0:
                     continue
@@ -296,15 +298,16 @@ class FastqStream_mmap:
             # add call to close memory map, only file itself is under with()
             mm.close()
 
-        if not batch.startswith('@') and not batch.startswith('>'):
+        if not batch[0].startswith('@') and not batch[0].startswith('>'):
             logging.info("The batch is broken")
 
         if delete:
-            # remove the row from the offsets so it does not get sampled again
+            # remove the row from the offsets, so it does not get sampled again
             new_offsets = np.delete(self.offsets, 0, 0)
             self.offsets = new_offsets
         # parse the batch, which is just a long string into dicts
-        read_lengths, read_sequences, read_sources, basesTOTAL = FastqStream.parse_batch(batch_string=batch)
+        batch_string = ''.join(batch)
+        read_lengths, read_sequences, read_sources, basesTOTAL = FastqStream.parse_batch(batch_string=batch_string)
         return read_lengths, read_sequences, read_sources, basesTOTAL
 
 
