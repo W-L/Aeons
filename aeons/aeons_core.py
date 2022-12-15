@@ -689,11 +689,15 @@ class AeonsRun:
         logging.info('')
         logging.info("ava pool")
         contigs = self.pool.declare_contigs(min_contig_len=self.filt.min_contig_len)
+        if not contigs:
+            return
         pool_paf = self.pool.run_ava(sequences=contigs.seqdict(), fa=self.pool.fa, paf=self.pool.ava)
         pool_contained, pool_ovl = self.ava.load_ava(paf=pool_paf, seqpool=self.pool)
+        self.pool.increment(containment=pool_contained)
         cont = SequenceAVA.source_union(edges0=pool_contained, edges1={})
-        logging.info(f'removing {len(cont)} contained sequences from pool')
-        self.remove_seqs(sequences=cont)
+        if cont:
+            logging.info(f'removing {len(cont)} contained sequences from pool')
+            self.remove_seqs(sequences=cont)
         self.pool.reset_temperature(pool_ovl)
 
 
