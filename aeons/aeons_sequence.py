@@ -558,12 +558,12 @@ class SequencePool:
         # given some ids, remove them from the readpool
         # e.g. after making new paths, we want to remove the sequences used to construct them
         # as soon as a read is used, it can not contribute to any other alignment
+        popped = 0
         for sid in sequences:
             self.sequences.pop(sid, None)
-            # self.coverages.pop(sid, None)
-            # self.borders.pop(sid, None)
-            # self.atoms.pop(sid, None)
+            popped += 1
         logging.info(f'pool size: {len(self.sequences)}')
+        logging.info(f'popped {popped}')
 
 
 
