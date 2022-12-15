@@ -119,9 +119,13 @@ class PafLine:
 
 
     def _internal_match(self, max_overhang=1000, overhang2mapping_ratio=0.8):
-        im = True if self.overhang() > min(max_overhang,
-                                           (self.map_length() * overhang2mapping_ratio)) else False
-        return im
+        # im = True if self.overhang() > min(max_overhang,
+        #                                    (self.map_length() * overhang2mapping_ratio)) else False
+        # return im
+        if self.overhang() > (self.map_length() * 0.15):
+            return True
+        else:
+            return False
 
 
     def _first_contained(self):
