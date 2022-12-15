@@ -547,7 +547,7 @@ class SequencePool:
         stdout, stderr = execute(comm)
         write_logs(stdout, stderr, f'{self.out_dir}/logs/ava_add')
         # mapping new sequences to previous pool
-        comm = f'{self.dep.mm2} -x map-ont --dual=yes -k15 -Xw5 -e0 -m100 -r2k -t{self.threads} {self.fa} {new_fa} >{new_onto_pool}'
+        comm = f'{self.dep.mm2} -x map-ont -w5 -e0 -m100 -r2k -t{self.threads} {self.fa} {new_fa} >{new_onto_pool}'
         stdout, stderr = execute(comm)
         write_logs(stdout, stderr, f'{self.out_dir}/logs/map2pool')
         # return filenames to be ingested as AVA
