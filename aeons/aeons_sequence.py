@@ -107,9 +107,9 @@ class SequenceAVA:
     def remove_links(self, sequences):
         # remove overlaps of certain sequences
         for sid in sequences:
-            # targets for overlaps where sid is query
+            # targets for overlaps where sid is "query"
             targets = self.links[sid].keys()
-            # remove the overlaps where sid is query
+            # remove the overlaps where sid is "query"
             self.links.pop(sid, None)
             # remove overlaps from targets
             for t in targets:
@@ -280,7 +280,7 @@ class Sequence:
 
     def polish_sequence(self, read_sources):
         success = 0
-        # dont polish raw reads, only derived sequences
+        # don't polish raw reads, only derived sequences
         if '*' not in self.header:
             return success
         # threshold for polishing, do it only at some timepoint
@@ -306,7 +306,7 @@ class Sequence:
         orig_len = len(self.seq)
         new_len = len(polished_seq)
         len_diff = abs(orig_len - new_len)
-        # dont use new seq if the length changed by a lot
+        # don't use new seq if the length changed by a lot
         if len_diff > orig_len * 0.1:
             return 0
         # replace the sequence with polished one
@@ -781,50 +781,50 @@ class SequencePool:
                 fasta.write(f'{seq}\n')
 
 
-
-    @staticmethod
-    def contigs2gfa(gfa, contigs, node_size):
-        # convert sequences to gfa with chunked up nodes
-        # verify file exists and is empty
-        empty_file(gfa)
-        # init node counter
-        node = 0
-        n = node_size
-        # check if there are any contigs
-        if not contigs:
-            return
-
-        # record the source and position of the nodes
-        node_sources = dict()
-        node_positions = dict()
-
-        # loop through contigs
-        for header, seqo in contigs.sequences.items():
-            # translate each sequence into gfa with fixed node size
-            # number of first seg in this longer segment
-            node_init = deepcopy(node)
-            # write a single sequence to gfa file
-            # chunk it up into nodes
-            seq = seqo.seq
-            cpos = 0
-            seq_chunks = [seq[i: i + n] for i in range(0, len(seq), n)]
-            # also chunk up the coverage of this segment
-            cov = seqo.cov
-            cov_chunks = [np.sum(cov[i: i + n]) for i in range(0, len(cov), n)]
-
-            with open(gfa, 'a') as gfa_file:
-                for c_idx in range(len(seq_chunks)):
-                    gfa_file.write(f'S\t{node}\t{seq_chunks[c_idx]}\tc:i:{cov_chunks[c_idx]}\n')
-                    node_sources[node] = header
-                    node_positions[node] = (cpos, cpos + n - 1)
-                    node += 1
-                    cpos += n
-
-                for i in range(node_init, node - 1):
-                    gfa_file.write(f'L\t{i}\t+\t{i + 1}\t+\t0M\n')
-                    gfa_file.write(f'L\t{i + 1}\t-\t{i}\t-\t0M\n')
-
-        return node_sources, node_positions
+    # TODO depr
+    # @staticmethod
+    # def contigs2gfa(gfa, contigs, node_size):
+    #     # convert sequences to gfa with chunked up nodes
+    #     # verify file exists and is empty
+    #     empty_file(gfa)
+    #     # init node counter
+    #     node = 0
+    #     n = node_size
+    #     # check if there are any contigs
+    #     if not contigs:
+    #         return
+    #
+    #     # record the source and position of the nodes
+    #     node_sources = dict()
+    #     node_positions = dict()
+    #
+    #     # loop through contigs
+    #     for header, seqo in contigs.sequences.items():
+    #         # translate each sequence into gfa with fixed node size
+    #         # number of first seg in this longer segment
+    #         node_init = deepcopy(node)
+    #         # write a single sequence to gfa file
+    #         # chunk it up into nodes
+    #         seq = seqo.seq
+    #         cpos = 0
+    #         seq_chunks = [seq[i: i + n] for i in range(0, len(seq), n)]
+    #         # also chunk up the coverage of this segment
+    #         cov = seqo.cov.copy()
+    #         cov_chunks = [np.sum(cov[i: i + n]) for i in range(0, len(cov), n)]
+    #
+    #         with open(gfa, 'a') as gfa_file:
+    #             for c_idx in range(len(seq_chunks)):
+    #                 gfa_file.write(f'S\t{node}\t{seq_chunks[c_idx]}\tc:i:{cov_chunks[c_idx]}\n')
+    #                 node_sources[node] = header
+    #                 node_positions[node] = (cpos, cpos + n - 1)
+    #                 node += 1
+    #                 cpos += n
+    #
+    #             for i in range(node_init, node - 1):
+    #                 gfa_file.write(f'L\t{i}\t+\t{i + 1}\t+\t0M\n')
+    #                 gfa_file.write(f'L\t{i + 1}\t-\t{i}\t-\t0M\n')
+    #
+    #     return node_sources, node_positions
 
 
 
@@ -1124,7 +1124,7 @@ class UnitigPool:
 class CoverageMerger:
 
     def __init__(self, unitig, seqpool):
-        # create the merged coverage array for a unitig
+        # create the merged coverage array for an unitig
         self.unitig = unitig
         cov_arr = self._create_merged_arr(atoms=unitig.atoms, seqpool=seqpool)
         assert unitig.length == cov_arr.shape[0]
@@ -1134,7 +1134,6 @@ class CoverageMerger:
         arr_parts = []
         cpos = 0
         for a in atoms:
-            # a is a dictionary
             assert a['pos'] >= cpos
             name = a['name']
             atom_arr = seqpool[name].cov.copy()
@@ -1225,7 +1224,7 @@ class MultilineContainments:
                 )
                 return cont
 
-        # if neither q or t are contained
+        # if neither q nor t are contained
         return False
 
 
