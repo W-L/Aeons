@@ -299,7 +299,7 @@ class AeonsRun:
         # write pool to file
         SequencePool.write_seq_dict(seq_dict=self.pool.seqdict(), file=self.pool.fa)
         # create gfa and unitigs
-        gfa = self.ava.paf2gfa_gfatools(paf=self.ava.paf_links, fa=self.pool.fa, gfa="dbg.gfa")
+        gfa = self.ava.paf2gfa_gfatools(paf=self.ava.paf_links, fa=self.pool.fa)
         # load the new unitigs
         unitigs = SequencePool.load_unitigs(gfa=gfa)
         # put them into a collection
@@ -903,8 +903,8 @@ class AeonsRun:
         #  -------------------------------- POST DECISIONS
         logging.info("")
 
-        if self.batch % 5 == 0:
-            print("breakpoint")
+        # if self.batch % 5 == 0:
+        #     print("breakpoint")
 
         # filter sequences with repeats at the end
         if self.args.filter_repeats:
