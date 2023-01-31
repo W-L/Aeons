@@ -35,7 +35,7 @@ from minknow_api import __version__ as minknow_api_version
 
 
 # TODO tmp imports
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 # backend for interactive plots
 # plt.switch_backend("GTK3cairo")
 # plt.switch_backend("Qt5cairo")
@@ -166,6 +166,7 @@ class AeonsRun:
             # create first asm
             self.assemble_add_and_filter_contigs()
 
+            # cov_counts, cov_means = self.pool.count_coverage()
 
 
         else:
@@ -961,6 +962,7 @@ class AeonsRun:
         self.batch += 1
         logging.info(f"batch took: {time.time() - tic}")
 
+        # cov_counts, cov_means = self.pool.count_coverage()
 
     def __repr__(self):
         return str(self.__dict__)
