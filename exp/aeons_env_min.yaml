@@ -1,0 +1,19 @@
+name: aeons_env
+channels:
+  - bioconda
+  - conda-forge
+  - defaults
+dependencies:
+  - gfatools=0.5=h7132678_2
+  - mappy=2.24=py38h4c6a040_1
+  - minimap2=2.24=h7132678_1
+  - numpy=1.17.4=py38hd5be1e1_0
+  - numpy-base=1.17.4=py38h2f8d375_0
+  - pandas=1.2.3=py38h51da96c_0
+  - pip=23.0=pyhd8ed1ab_0
+  - pyfastx=0.8.4=py38h4c6a040_1
+  - python=3.8.15=he550d4f_1_cpython
+  - scipy=1.5.3=py38h828c644_0
+  - toml=0.10.2=pyhd8ed1ab_0
+  - pip:
+    - ont-fast5-api==4.1.1
