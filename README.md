@@ -11,8 +11,10 @@
 
 ## Installation:
 
+```
+mamba env create -f aeons_env_min.yaml
+```
 
-`mamba env create -f aeons_env_min.yaml`
 
 ```
 conda activate aeons_env
@@ -27,11 +29,11 @@ git clone https://github.com/W-L/Aeons.git
 
 ## Run:
 
+```
+readfish boss-runs --device X1 --experiment-name "zymolog001" --toml zymolog001.toml --port 9502 --log-file readfish_zymolog001.log 
 
-`readfish boss-runs --device X1 --experiment-name "zymolog001" --toml zymolog001.toml --port 9502 --log-file readfish_zymolog001.log` 
-
-
-`python /Aeons/aeons_live.py @zymolog001.params &>aeons_zymolog001.log`
+python /Aeons/aeons_live.py @zymolog001.params &>aeons_zymolog001.log
+```
 
 
 
