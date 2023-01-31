@@ -14,14 +14,14 @@
 
 `mamba env create -f aeons_env_min.yaml`
 
-`conda activate aeons_env`
-
-`pip install git+https://github.com/nanoporetech/read_until_api@v3.0.0`
-`pip install git+https://github.com/W-L/readfish@issue208`
-`apt list --installed ont-guppy* | tail -n 1 | cut -f2 -d' ' | cut -f1 -d'-' >guppy_version`
-`pip install ont_pyguppy_client_lib==$(cat guppy_version)`
-
-`git clone https://github.com/W-L/Aeons.git`
+```
+conda activate aeons_env
+pip install git+https://github.com/nanoporetech/read_until_api@v3.0.0
+pip install git+https://github.com/W-L/readfish@issue208
+apt list --installed ont-guppy* | tail -n 1 | cut -f2 -d' ' | cut -f1 -d'-' >guppy_version
+pip install ont_pyguppy_client_lib==$(cat guppy_version)
+git clone https://github.com/W-L/Aeons.git
+```
 
 
 
@@ -29,6 +29,7 @@
 
 
 `readfish boss-runs --device X1 --experiment-name "zymolog001" --toml zymolog001.toml --port 9502 --log-file readfish_zymolog001.log` 
+
 
 `python /Aeons/aeons_live.py @zymolog001.params &>aeons_zymolog001.log`
 
