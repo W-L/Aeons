@@ -1,5 +1,5 @@
 --device X1
 --name zymolog001
---tetra
+--tetra 1
 --live
 --split_flowcell 
