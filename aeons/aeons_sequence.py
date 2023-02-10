@@ -431,7 +431,7 @@ class Sequence:
 
 class SequencePool:
 
-    def __init__(self, sequences=None, name="dummy", min_len=3000, out_dir="dummy", threads=12):
+    def __init__(self, sequences=None, name="dummy", min_len=3000, out_dir="dummy", threads=24):
         # a unified pool for reads and contigs with persistent AVA
         self.min_len = min_len
         self.out_dir = out_dir
@@ -473,14 +473,22 @@ class SequencePool:
 
     def count_coverage(self):
         # check the coverage of all sequences in the pool
-        cov_counts = np.zeros(shape=1000)
+        cov_counts = np.zeros(shape=200)
+        cov_means = np.zeros(shape=1000)
+        i = 0
         for header, seqo in self.sequences.items():
             seqo_counts = np.bincount(seqo.cov.astype('int'))
-            print(header)
-            print(seqo_counts)
             cov_counts[:seqo_counts.shape[0]] += seqo_counts
+            seqo_mean = np.mean(seqo.cov)
+            cov_means[i] = seqo_mean
+            i += 1
+            if header.startswith("SRR"):
+                continue
+            # print(header)
+            # print(seqo_mean)
         cov_counts_t = np.trim_zeros(cov_counts, trim='b')
-        return cov_counts_t
+        cov_means_t = np.trim_zeros(cov_means, trim='b')
+        return cov_counts_t, cov_means_t
 
 
     def ingest(self, seqs):
@@ -918,7 +926,7 @@ class SequencePool:
         # this makes sure that the unitigs are split
         # and that we can filter the link lines
         # first check if there are any unitigs
-        if len(gfa) == 0:
+        if not gfa:
             return []
 
         if gfa.startswith('S\t'):
