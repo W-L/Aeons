@@ -7,6 +7,7 @@ from .aeons_readlengthdist import ReadlengthDist
 from .aeons_paf import Paf, choose_best_mapper
 from .aeons_mapper import LinearMapper # , ValidationMapping
 from .aeons_sequence import SequencePool, SequenceAVA, UnitigPool, ContigPool
+from .aeons_benefit import init_scoring_vec
 from .aeons_repeats import RepeatFilter2
 
 
@@ -87,6 +88,8 @@ class AeonsRun:
         self.pool.load_dependencies()
         self.ava.load_dependencies()
         self.rl_dist = ReadlengthDist(mu=args.mu)
+        # init scoring func
+        self.score_vec = init_scoring_vec(lowcov=args.lowcov)
 
 
         if not args.live:
@@ -939,13 +942,22 @@ class AeonsRun:
         frozen_ids = self.pool.decrease_temperature(lim=self.filt.min_contig_len)
         self.remove_seqs(sequences=frozen_ids)
 
-        self.strat = contig_pool.process_contigs(
+        # SIMPLER MODEL WITH ROLLING TARGET STRATEGY
+        # self.strat = contig_pool.process_contigs(
+        #     node_size=self.args.node_size,
+        #     lim=self.args.lowcov,
+        #     ccl=self.rl_dist.approx_ccl,
+        #     out_dir=self.args.out_dir,
+        #     write=True)
+
+        self.strat = contig_pool.process_contigs_m0(
+            score_vec=self.score_vec,
             node_size=self.args.node_size,
-            lim=self.args.lowcov,
             ccl=self.rl_dist.approx_ccl,
             out_dir=self.args.out_dir,
+            mu=self.args.mu,
+            lam=self.rl_dist.lam,
             write=True)
-
 
         # self.strat_csv(self.strat, node2pos)  # this is for bandage viz
 
