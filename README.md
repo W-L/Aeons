@@ -43,7 +43,7 @@ python /Aeons/aeons_live.py @zymolog001.params &>aeons_zymolog001.log
 ```
 conda create -n aeons_env
 conda activate aeons_env
-mamba install python=3.8 numpy==1.17.4 mappy minimap2 gfatools pandas toml pyfastx scipy
+mamba install python=3.8 numpy==1.17.4 mappy minimap2 gfatools pandas toml pyfastx scipy bottleneck
 pip install ont_fast5_api
 
 conda env export >aeons_env.yaml
