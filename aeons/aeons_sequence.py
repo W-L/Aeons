@@ -12,6 +12,7 @@ from .aeons_utils import execute, find_exe, write_logs, empty_file, random_id, f
 from .aeons_polisher import Polisher
 from .aeons_kmer import euclidean_dist, euclidean_threshold
 from .aeons_mapper import Indexer
+from .aeons_benefit import benefit_bins, calc_fragment_benefit, score_array
 
 
 
@@ -341,6 +342,28 @@ class Sequence:
         self.cov_chunked = np.array([np.sum(cov[i: i + n]) for i in range(0, len(cov), n)])
         # init an empty array to record nodes of interest
         self.noi = np.zeros(shape=self.cov_chunked.shape[0], dtype="bool")
+        self.scores = np.zeros(shape=self.cov_chunked.shape[0], dtype="float")
+        self.benefit = np.zeros(shape=self.cov_chunked.shape[0], dtype="float")
+
+
+    def contig_scores(self, score_vec, n):
+        sc = score_array(score_vec=score_vec, cov_arr=self.cov_chunked, node_size=n)
+        self.scores = sc
+        assert self.cov_chunked.shape[0] == self.scores.shape[0]
+
+
+    def contig_benefits(self, mu, ccl, node_size):
+        benefit, smu_sum = calc_fragment_benefit(
+            scores=self.scores,
+            mu=mu,
+            approx_ccl=ccl,
+            node_size=node_size,
+            e1=self.noi[0],
+            e2=self.noi[-1]
+        )
+        self.benefit = benefit
+        self.smu_sum = smu_sum
+        assert self.cov_chunked.shape[0] == self.benefit.shape[1]
 
 
 
@@ -351,8 +374,10 @@ class Sequence:
         elif self.cap_l:
             pass
         # only set as interesting if every check fails
+        # for either model: mark as noi or give max score
         else:
             self.noi[0] = 1
+            self.scores[0] = 1
 
         if cc[-1] > lim * n:
             pass
@@ -360,6 +385,7 @@ class Sequence:
             pass
         else:
             self.noi[-1] = 1
+            self.scores[-1] = 1
 
 
     def find_low_cov(self, n, lim):
@@ -391,6 +417,12 @@ class Sequence:
         rev = roll_boolean_array(arr=self.noi.copy(), steps=n_steps, direction=1)
         self.strat = np.column_stack((fwd, rev))
         return self.strat
+
+
+
+    def find_strat_m0(self, threshold):
+        strat = np.where(self.benefit >= threshold, True, False)
+        return strat.transpose()
 
 
 
@@ -951,6 +983,30 @@ class ContigPool(SequencePool):
         return contig_strats
 
 
+    def process_contigs_m0(self, score_vec, node_size, ccl, out_dir, mu, lam, write=False):
+        # WRAPPER
+        logging.info("finding new strategies.. ")
+        # chunk up contigs
+        logging.info("chunking contigs")
+        self._chunk_up_contigs(node_size=node_size)
+        # find scores
+        self._contigs_scores(score_vec=score_vec, node_size=node_size)
+        # process ends and low cov regions
+        self._process_contig_ends(node_size=node_size)
+        # find benefit
+        self._contigs_benefits(ccl=ccl, mu=mu, node_size=node_size)
+        # find threshold
+        t = self.find_threshold(mu=mu, lam=lam, node_size=node_size)
+        # find and write new strategies
+        logging.info("finding strategies - m0")
+        contig_strats = self._find_contig_strategies(node_size=node_size, ccl=ccl, t=t, m0=True)
+        if write:
+            logging.info("writing new strategies")
+            self._write_contig_strategies(out_dir=out_dir, contig_strats=contig_strats)
+            self._write_index_file(out_dir=out_dir)
+        return contig_strats
+
+
     def _chunk_up_contigs(self, node_size):
         # first thing to do for contigs
         # for a collection of contigs, give them a chunked representation
@@ -965,6 +1021,55 @@ class ContigPool(SequencePool):
         logging.info(f'num components: {n_comp}')
         logging.info(f'total comp length: {lengths_sort.sum()}')
         logging.info(f'longest components: {lengths_sort[:10]}')
+
+
+    def _contigs_scores(self, score_vec, node_size):
+        # get the scores for each contig
+        for header, seqo in self.sequences.items():
+            seqo.contig_scores(score_vec=score_vec, n=node_size)
+
+
+
+    def _contigs_benefits(self, ccl, mu, node_size):
+        # get the benefit for each contig
+        for header, seqo in self.sequences.items():
+            seqo.contig_benefits(mu=mu, ccl=ccl, node_size=node_size)
+
+
+    def find_threshold(self, mu, lam, node_size):
+        # flatten all benefit values
+        benefit = np.column_stack([seqo.benefit for seqo in self.sequences.values()]).ravel()
+        smu_sum = np.sum([seqo.smu_sum for seqo in self.sequences.values()])
+
+        # find acceptance threshold
+        alpha = 200 // node_size
+        rho = 300 // node_size
+        tc = (lam - mu - 300) // node_size
+
+        benefit_bin, counts = benefit_bins(benefit)
+
+        # average benefit of strategy in the case that all fragments are rejected
+        ubar0 = smu_sum
+        tbar0 = alpha + rho + (mu // node_size)
+        # cumsum of the benefit (bins multiplied by how many sites are in the bin)
+        cs_u = np.cumsum(benefit_bin * counts) + ubar0
+        cs_t = np.cumsum(tc * counts) + tbar0
+        peak = cs_u / cs_t
+        strat_size = np.argmax(peak) + 1
+        # plt.plot(cs_u)
+        # plt.plot(cs_t)
+        # plt.plot(peak)
+        # plt.show()
+
+        # calculate threshold exponent and where values are geq
+        try:
+            threshold = benefit_bin[strat_size]
+        except IndexError:
+            threshold = benefit_bin[-1]
+
+        return threshold
+
+
 
 
     def _process_contig_ends(self, node_size):
@@ -984,11 +1089,14 @@ class ContigPool(SequencePool):
         logging.info(f'low coverage nodes: {unfilt}, after filtering: {filt}')
 
 
-    def _find_contig_strategies(self, node_size, ccl):
+    def _find_contig_strategies(self, node_size, ccl, t=0, m0=False):
         # find the boolean strategy for each contig
         contig_strats = {}
         for header, seqo in self.sequences.items():
-            cstrat = seqo.find_strat(ccl=ccl, n=node_size)
+            if not m0:
+                cstrat = seqo.find_strat(ccl=ccl, n=node_size)
+            else:
+                cstrat = seqo.find_strat_m0(threshold=t)
             contig_strats[header] = cstrat
         return contig_strats
 
@@ -1283,7 +1391,6 @@ class MultilineContainments:
         # mark as first contained
         rec.c = 2
         return {(ctd_name, ctr_name): rec}
-
 
 
 
