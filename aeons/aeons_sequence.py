@@ -736,6 +736,8 @@ class SequencePool:
 
         # get the first edges to increment, i.e. those with 0 in-degree
         edges, next_edges = self.get_next_increment_edges(edges, previous_edges=None)
+        if not next_edges:
+            return []
         edge_multiplicity = self.find_edge_multiplicity(next_edges)
         self.affect_increments(next_edges, containment, edge_multiplicity)
         previous_edges = next_edges
@@ -743,6 +745,8 @@ class SequencePool:
         while len(edges) > 0:
             # get the next edges to deal with
             edges, next_edges = self.get_next_increment_edges(edges, previous_edges=previous_edges)
+            if not next_edges:
+                return []
             edge_multiplicity = self.find_edge_multiplicity(next_edges)
             self.affect_increments(next_edges, containment, edge_multiplicity)
 
