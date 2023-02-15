@@ -2,6 +2,8 @@ from scipy.stats import gamma
 import numpy as np
 import bottleneck as bn
 
+from concurrent.futures import ThreadPoolExecutor as TPexe
+
 
 # functions for scoring coverage arrays
 
