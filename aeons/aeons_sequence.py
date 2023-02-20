@@ -43,6 +43,8 @@ class SequenceAVA:
         self.links = defaultdict(lambda: defaultdict(PafLine))
         self.paf_links = f"{paf}.links.paf"
 
+        self.dep = Dependencies()  # TODO
+
 
     def load_dependencies(self):
         self.dep = Dependencies()
@@ -457,6 +459,8 @@ class SequencePool:
         self.contig_fa = f'{name}.contig.fa'  # fasta of long sequences to map against
         self.ava = f'{name}.ava'  # ava in paf
         self.gfa = f'{name}.gfa'
+
+        self.dep = Dependencies()  # TODO
 
 
 
