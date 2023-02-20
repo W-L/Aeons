@@ -53,6 +53,7 @@ class AeonsRun:
 
     def __init__(self, args):
         # initialise constants and put into arguments
+        # constants overwrite args with same name
         const = Constants()
         for c, cval in const.__dict__.items():
             setattr(args, c, cval)
@@ -822,7 +823,7 @@ class AeonsRun:
         tic = time.time()
 
         # find new fastq files
-        new_fastq, self.processed_files = LiveRun.scan_dir(
+        new_fastq = LiveRun.scan_dir(
             fq=self.args.fq, processed_files=self.processed_files)
         if not new_fastq:
             logging.info("no new files, deferring update ")
@@ -1214,7 +1215,8 @@ class LiveRun:
         # which files have we not seen before?
         new_fq = all_fq.difference(processed_files)
         logging.info(f"found {len(new_fq)} new fq files: \n {new_fq}")
-        return list(new_fq)
+        new_fq_list = [f for f in new_fq]
+        return new_fq_list
 
 
 
