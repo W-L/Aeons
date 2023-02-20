@@ -19,11 +19,11 @@ from .aeons_benefit import benefit_bins, calc_fragment_benefit, score_array
 class Dependencies:
     def __init__(self):
         self.mm2 = find_exe("minimap2")
-        logging.info(f'mm2: {self.mm2}')
+        # logging.info(f'mm2: {self.mm2}')
         if not self.mm2:
             sys.exit("Dependency minimap2 not found in path")
         self.paf2gfa = find_exe("paf2gfa")
-        logging.info(f'paf2gfa: {self.paf2gfa}')
+        # logging.info(f'paf2gfa: {self.paf2gfa}')
         if not self.paf2gfa:
             sys.exit("Dependency paf2gfa (gfatools) not found in path")
 
