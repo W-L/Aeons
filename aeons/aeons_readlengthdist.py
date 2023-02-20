@@ -115,7 +115,7 @@ class ReadlengthDist:
         i = 0
         for part in range(self.eta - 1):
             prob = 1 - (part + 0.5) / (self.eta - 1)
-            while ccl[i] > prob:
+            while (ccl[i] > prob) and (len(ccl) > i):
                 i += 1
             approx_ccl[part] = i
         return approx_ccl
