@@ -869,11 +869,21 @@ class AeonsRun:
         frozen_ids = self.pool.decrease_temperature(lim=self.filt.min_contig_len)
         self.remove_seqs(sequences=frozen_ids)
 
-        self.strat = contig_pool.process_contigs(
+        # self.strat = contig_pool.process_contigs(
+        #     node_size=self.args.node_size,
+        #     lim=self.args.lowcov,
+        #     ccl=self.rl_dist.approx_ccl,
+        #     out_dir=self.args.out_dir,
+        #     write=True)
+
+
+        self.strat = contig_pool.process_contigs_m0(
+            score_vec=self.score_vec,
             node_size=self.args.node_size,
-            lim=self.args.lowcov,
             ccl=self.rl_dist.approx_ccl,
             out_dir=self.args.out_dir,
+            mu=self.args.mu,
+            lam=self.rl_dist.lam,
             write=True)
 
         # collect metrics
