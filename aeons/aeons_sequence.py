@@ -656,7 +656,8 @@ class SequencePool:
         self.ingest(seqs=trimmed_pool)
 
         # combine sequence dicts for mapping
-        seq_dict = trimmed_pool.seqdict() | other_pool.seqdict()
+        # seq_dict = trimmed_pool.seqdict() | other_pool.seqdict()  # TODO
+        seq_dict = dict(trimmed_pool.seqdict(), **other_pool.seqdict())
         return seq_dict
 
 
