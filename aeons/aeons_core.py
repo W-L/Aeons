@@ -83,7 +83,7 @@ class AeonsRun:
         # initialise a log file in the output folder
         init_logger(logfile=f'{args.out_dir}/{args.name}.aeons.log', args=args)
 
-        self.filt = Filters()
+        self.filt = Filters(args=args)
         self.pool = SequencePool(name=args.name, min_len=self.filt.min_seq_len, out_dir=args.out_dir)
         self.ava = SequenceAVA(paf=f'{args.name}.ava', tetra=args.tetra, filters=self.filt)
         # load dependencies for the Pool and AVA
@@ -1334,10 +1334,15 @@ def setup_parser():
     parser.add_argument('--dumptime', dest='dumptime', type=int, default=1, help='interval for dumping batches')                                # SIM
     parser.add_argument('--seed', dest='seed', type=int, default=1, help='seed for shuffling input')                                            # SIM   # OPT
     parser.add_argument('--gsize', dest='gsize', type=float, default=12e6, help='genome size estimate')                                         # SIM   # OPT
+    parser.add_argument('--temperature', dest='temperature', type=int, default=30, help='temperature before freezing a sequence')               # SIM   # OPT
+    # replace filter values with arguments
+    parser.add_argument('--min_seq_len', dest='min_seq_len', type=int, default=3000, help='min length to consider for overlaps')                # OPT
+    parser.add_argument('--min_contig_len', dest='min_contig_len', type=int, default=30_000, help='min length to consider for mapping against') # OPT
+    parser.add_argument('--min_s1', dest='min_s1', type=int, default=200, help='min score for overlaps')                                        # OPT
+    parser.add_argument('--min_map_len', dest='min_map_len', type=int, default=2000, help='min overlap length')                                 # OPT
     # for auto snake
     parser.add_argument('--snake', dest='snake', type=str, default=None, help='path to snakemake config')                                       # SIM   # OPT
-    # parser.add_argument('--ref', dest='ref', type=str, default="", help='reference used in quast evaluation and redotable')                   # SIM   # OPT
-    # TODO live version
+    # args specific to live version
     parser.add_argument('--live', default=False, action="store_true", help="internally used switch")
     parser.add_argument('--device', default=None, type=str, help="employed device/sequencing position")
     parser.add_argument('--host', default='localhost', type=str, help="host of sequencing device")
