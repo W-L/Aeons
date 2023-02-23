@@ -185,7 +185,7 @@ class AeonsRun:
                 # waiting until we have some data
                 logging.info("no contigs yet. Waiting for data ... ")
                 new_fastq = []
-                while len(new_fastq) < 2:
+                while len(new_fastq) < args.cov_wait:
                     logging.info("waiting for data ... ")
                     time.sleep(5)
                     new_fastq = LiveRun.scan_dir(fq=self.args.fq, processed_files=set())
@@ -1348,6 +1348,7 @@ def setup_parser():
     parser.add_argument('--host', default='localhost', type=str, help="host of sequencing device")
     parser.add_argument('--port', default=None, type=int, help="port of sequencing device")
     parser.add_argument('--split_flowcell', default=False, action="store_true", help="assign channels to conditions with channels.toml")
+    parser.add_argument('--cov_wait', dest='cov_wait', type=int, default=2, help='wait until X files until first try for assembly')
     return parser
 
 

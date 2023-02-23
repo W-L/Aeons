@@ -11,7 +11,7 @@ class Constants:
         self.rho = 300
         self.alpha = 200
         self.wait = 60                  # waiting time in live version
-        self.cov_wait = 2
+        # self.cov_wait = 2
         # self.redotable = "/hps/software/users/goldman/lukasw/redotable/redotable_v1.1/redotable"
         # self.redotable = "/home/lukas/software/redotable/redotable_v1.1/redotable"
 
