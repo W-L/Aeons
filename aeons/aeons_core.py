@@ -78,6 +78,7 @@ class AeonsRun:
             os.mkdir(f'{args.out_dir}/fq')
             os.mkdir(f'{args.out_dir}/logs')
             os.mkdir(f'{args.out_dir}/contigs')
+            os.mkdir(f'{args.out_dir}/contigs/prev')
 
         # initialise a log file in the output folder
         init_logger(logfile=f'{args.out_dir}/{args.name}.aeons.log', args=args)
@@ -884,6 +885,7 @@ class AeonsRun:
             out_dir=self.args.out_dir,
             mu=self.args.mu,
             lam=self.rl_dist.lam,
+            batch=self.batch,
             write=True)
 
         # collect metrics
@@ -968,6 +970,7 @@ class AeonsRun:
             out_dir=self.args.out_dir,
             mu=self.args.mu,
             lam=self.rl_dist.lam,
+            batch=self.batch,
             write=True)
 
         # self.strat_csv(self.strat, node2pos)  # this is for bandage viz

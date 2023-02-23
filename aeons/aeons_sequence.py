@@ -4,6 +4,7 @@ import sys
 from collections import defaultdict, Counter
 from copy import deepcopy
 from pathlib import Path
+from shutil import copy
 
 import numpy as np
 
@@ -981,7 +982,7 @@ class ContigPool(SequencePool):
     - can do some additional things necessary for contigs
     """
 
-    def process_contigs(self, node_size, lim, ccl, out_dir, write=False):
+    def process_contigs(self, node_size, lim, ccl, out_dir, batch, write=False):
         # WRAPPER
         logging.info("finding new strategies.. ")
         # chunk up contigs
@@ -998,11 +999,11 @@ class ContigPool(SequencePool):
         if write:
             logging.info("writing new strategies")
             self._write_contig_strategies(out_dir=out_dir, contig_strats=contig_strats)
-            self._write_index_file(out_dir=out_dir)
+            self._write_index_file(out_dir=out_dir, batch=batch)
         return contig_strats
 
 
-    def process_contigs_m0(self, score_vec, node_size, ccl, out_dir, mu, lam, write=False):
+    def process_contigs_m0(self, score_vec, node_size, ccl, out_dir, mu, lam, batch, write=False):
         # WRAPPER
         logging.info("finding new strategies.. ")
         # chunk up contigs
@@ -1022,7 +1023,7 @@ class ContigPool(SequencePool):
         if write:
             logging.info("writing new strategies")
             self._write_contig_strategies(out_dir=out_dir, contig_strats=contig_strats)
-            self._write_index_file(out_dir=out_dir)
+            self._write_index_file(out_dir=out_dir, batch=batch)
         return contig_strats
 
 
@@ -1132,7 +1133,7 @@ class ContigPool(SequencePool):
 
 
 
-    def _write_index_file(self, out_dir):
+    def _write_index_file(self, out_dir, batch):
         # write new index file to map against
         # and place marker file to tell readfish to reload
         fa_path = f'{out_dir}/contigs/aeons.fa'
@@ -1144,6 +1145,9 @@ class ContigPool(SequencePool):
                 fasta.write(f'{seqo.seq}\n')
         # generate and save index with mappy
         Indexer(fasta=fa_path, mmi=mmi_path)
+        # copy previous contigs
+        if batch % 10 == 0:
+            copy(fa_path, f'{out_dir}/contigs/prev/aeons_{batch}.fa')
         # place a marker that the contigs were updated
         markerfile = f'{out_dir}/contigs/contigs.updated'
         Path(markerfile).touch()
