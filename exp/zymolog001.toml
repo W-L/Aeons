@@ -6,7 +6,7 @@ port = 5555
 
 [conditions]
 reference = ""
-axis = 0
+axis = 1
 
 [conditions.0]
 name = "control"
