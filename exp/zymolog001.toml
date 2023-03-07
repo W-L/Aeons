@@ -34,7 +34,7 @@ multi_off = "unblock"
 no_seq = "proceed"
 no_map = "stop_receiving"
 mask = "out_zymolive001/masks"
-contigs = "out_zymolive/contigs"
+contigs = "out_zymolive001/contigs"
 
 
 
