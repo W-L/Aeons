@@ -2,8 +2,9 @@ import subprocess
 from shutil import which
 from sys import executable
 from itertools import groupby
-import numpy as np
 import argparse
+
+import numpy as np
 
 
 class MyArgumentParser(argparse.ArgumentParser):
@@ -295,12 +296,12 @@ def ascii_hist_values(values, max_symbols=50):
 
 
 def redotable(fa, out, prg='/home/lukas/software/redotable/redotable_v1.1/redotable',
-              ref='/home/lukas/Desktop/Aeons/data/ecoli/ecoli_k12_U00096_3.fa', size=1000,
+              ref='/home/lukas/Desktop/Aeons/38_synmix/mod/ec.fa', size=1000,
               logdir='redotable_log'):
     # run redotable to create a dotplot compared to a reference
     comm = f"{prg} --width {size} --height {size} --reordery {ref} {fa} {out}"
     print(comm)
-    stdout, stderr = spawn(comm)
+    stdout, stderr = execute(comm)
     write_logs(stdout, stderr, logdir)
 
 
