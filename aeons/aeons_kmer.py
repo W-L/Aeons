@@ -3,7 +3,7 @@ from itertools import product
 from math import sqrt
 # NON STANDARD LIBRARY
 import numpy as np
-from scipy.stats import pearsonr
+# from scipy.stats import pearsonr
 # CUSTOM
 from .aeons_utils import reverse_complement
 
@@ -128,25 +128,25 @@ class TetramerDist:
         self.kmc = KmerCounter()
 
 
-    def pearson_cor(self, seqo1, seqo2):
-        # check if sequences already have tetramer zscores
-        tz1 = getattr(seqo1, 'tetramer_zscores', None)
-        tz2 = getattr(seqo2, 'tetramer_zscores', None)
-        # calculate them if not
-        if not tz1:
-            seqo1.tetramer_zscores = self.kmc.tetra_zscores(seq=seqo1.seq)
-        if not tz2:
-            seqo2.tetramer_zscores = self.kmc.tetra_zscores(seq=seqo2.seq)
-        # grab the zscores
-        t1 = seqo1.tetramer_zscores
-        t2 = seqo2.tetramer_zscores
-        # intersection to get all 4mers present in both sequences
-        tetramers = set(sorted(t1.keys())) & set(sorted(t2.keys()))
-        z1 = [t1[t] for t in tetramers]
-        z2 = [t2[t] for t in tetramers]
-        # calculate pearson correlation
-        cor = pearsonr(z1, z2)
-        return cor
+    # def pearson_cor(self, seqo1, seqo2):
+    #     # check if sequences already have tetramer zscores
+    #     tz1 = getattr(seqo1, 'tetramer_zscores', None)
+    #     tz2 = getattr(seqo2, 'tetramer_zscores', None)
+    #     # calculate them if not
+    #     if not tz1:
+    #         seqo1.tetramer_zscores = self.kmc.tetra_zscores(seq=seqo1.seq)
+    #     if not tz2:
+    #         seqo2.tetramer_zscores = self.kmc.tetra_zscores(seq=seqo2.seq)
+    #     # grab the zscores
+    #     t1 = seqo1.tetramer_zscores
+    #     t2 = seqo2.tetramer_zscores
+    #     # intersection to get all 4mers present in both sequences
+    #     tetramers = set(sorted(t1.keys())) & set(sorted(t2.keys()))
+    #     z1 = [t1[t] for t in tetramers]
+    #     z2 = [t2[t] for t in tetramers]
+    #     # calculate pearson correlation
+    #     cor = pearsonr(z1, z2)
+    #     return cor
 
 
     def euclidean_dist(self, seqo1, seqo2):
@@ -206,7 +206,7 @@ tetramer_zscores = kmc.tetra_zscores                    # wrapper for tetramer z
 
 tdist = TetramerDist()
 euclidean_dist = tdist.euclidean_dist                   # distance function for sequence OBJECTS
-pearson_dist = tdist.pearson_cor                        # distance function for sequence OBJECTS
+# pearson_dist = tdist.pearson_cor                        # distance function for sequence OBJECTS
 euclidean_threshold = IntraProb().calc_threshold()      # constant from empirical parameters
 
 
