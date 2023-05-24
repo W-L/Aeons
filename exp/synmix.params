@@ -1,0 +1,12 @@
+--device X1
+--name synmix
+--tetra 1
+--live
+--split_flowcell
+--lowcov 10
+--temperature 60
+--min_seq_len 3000
+--min_contig_len 30000
+--min_s1 200
+--min_map_len 2000
+--cov_wait 20

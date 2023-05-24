@@ -1,0 +1,23 @@
+name: aeons_env
+channels:
+  - bioconda
+  - conda-forge
+  - defaults
+dependencies:
+  - gfatools=0.5
+  - mappy=2.24
+  - minimap2=2.24
+  - numpy=1.17.4
+  - numpy-base=1.17.4
+  - pandas=1.2.3
+  - pip=23.0
+  - pyfastx=0.8.4
+  - python=3.8.15
+  - scipy=1.5.3
+  - toml=0.10.2
+  - pip:
+    - ont-fast5-api==4.1.1
+    - ont-pyguppy-client-lib==6.3.9
+    - git+https://github.com/W-L/readfish@bc6cb99059e82d807c487f99bf83211577c4e68b
+    - git+https://github.com/nanoporetech/read_until_api@v3.4.1
+    - bottleneck==1.3.6
