@@ -1,4 +1,4 @@
-from scipy.stats import gamma
+# from scipy.stats import gamma
 import numpy as np
 import bottleneck as bn
 
@@ -10,8 +10,9 @@ from concurrent.futures import ThreadPoolExecutor as TPexe
 def init_scoring_vec(lowcov):
     # create scoring function depending on target coverage
     x = np.arange(101)
-    a = lowcov * 5
-    score_vec = -gamma.cdf(x, a=a, scale=0.2) + 1
+    # a = lowcov * 5
+    # score_vec = -gamma.cdf(x, a=a, scale=0.2) + 1
+    score_vec = 1 / (np.exp(x - lowcov) + 1)
     return score_vec
 
 
