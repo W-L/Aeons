@@ -2,38 +2,30 @@
 
 ## Things to check:
 
-- args for running aeons: device, host (localhost ?), port (9502 ?)
+- check connection details: 
+  - device (X1 - X5 ?) -> needs to be set in .params
+  - host (localhost ?), port (9502 ?) -> set in .toml and on readfish commandline
 - basecaller config: "dna_r9.4.1_450bps_fast"  
-- directions in readfish toml file
-- location of masks and contigs in toml file
+
 
 
 
 ## Installation:
 
 ```
-mamba env create -f aeons_env_min.yaml
-```
-
-
-```
+mamba env create -f aeons_env_synmix.yaml
 conda activate aeons_env
-pip install git+https://github.com/nanoporetech/read_until_api@v3.0.0
-pip install git+https://github.com/W-L/readfish@issue208
-apt list --installed ont-guppy* | tail -n 1 | cut -f2 -d' ' | cut -f1 -d'-' >guppy_version
-pip install ont_pyguppy_client_lib==$(cat guppy_version)
 git clone https://github.com/W-L/Aeons.git
 ```
-
-
 
 ## Run:
 
 ```
-readfish boss-runs --device X1 --experiment-name "zymolog001" --toml zymolog001.toml --port 9502 --log-file readfish_zymolog001.log 
+readfish boss-runs --device X1 --experiment-name "synmix" --toml synmix.toml --port 9502 --log-file readfish_synmix.log --chunk-log chunks.tsv --paf-log rf.paf
 
-python /Aeons/aeons_live.py @zymolog001.params &>aeons_zymolog001.log
+python /Aeons/aeons_live.py @synmix.params &>aeons_synmix.log
 ```
+
 
 
 
