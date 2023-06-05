@@ -11,8 +11,13 @@ while ar.batch <= args.maxb:
 
 ar.cleanup()
 
+#%%
+with open("aeons.done", 'w') as adone:
+    adone.write('')
+
+
 #%% auto snakemake
-if args.snake:
-    from aeons.aeons_utils import launch_post_snake
-    launch_post_snake(run_name=args.name, configfile=args.snake)
+# if args.snake:
+#     from aeons.aeons_utils import launch_post_snake
+#     launch_post_snake(run_name=args.name, configfile=args.snake)
 
