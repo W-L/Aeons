@@ -436,7 +436,7 @@ class Sequence:
 
 class SequencePool:
 
-    def __init__(self, sequences=None, name="dummy", min_len=3000, out_dir="dummy", threads=24):
+    def __init__(self, sequences=None, name="dummy", min_len=3000, out_dir="dummy", threads=6):
         # a unified pool for reads and contigs with persistent AVA
         self.min_len = min_len
         self.out_dir = out_dir
