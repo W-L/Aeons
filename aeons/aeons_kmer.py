@@ -1,24 +1,22 @@
-# STANDARD LIBRARY
 from itertools import product
 from math import sqrt
-# NON STANDARD LIBRARY
+from typing import Dict, Tuple, Any, List
+
 import numpy as np
-# from scipy.stats import pearsonr
-# CUSTOM
+from numpy.typing import NDArray
+
 from .aeons_utils import reverse_complement
 
 
 
 class KmerCounter:
 
-    """
-    kmer counter specifically for di-, tri-, and tetramers
-    general purpose class that can be initialised once
-    and then used for many sequences
-
-    """
-
     def __init__(self):
+        """
+        Initialize the KmerCounter object.
+        Specifically for di-, tri-, and tetramers
+        General purpose class that can be initialized once, then used for many sequences
+        """
         # initialise kmer_tables for n = {2, 3, 4}
         self.t2, self.k2 = self.kmer_table(2)
         self.t3, self.k3 = self.kmer_table(3)
@@ -26,7 +24,13 @@ class KmerCounter:
 
 
     @staticmethod
-    def kmer_table(k):
+    def kmer_table(k: int) -> Tuple[NDArray, List[str]]:
+        """
+        Generate a kmer table.
+
+        :param k: The length of the kmers.
+        :return: The kmer table and the list of kmers as strings.
+        """
         # initialise nucleotides and their ordinants
         NUC = ['A', 'C', 'G', 'T']
         ordinants = [ord(c) for c in NUC]
@@ -48,7 +52,13 @@ class KmerCounter:
 
 
     @staticmethod
-    def integer_seq(seq):
+    def integer_seq(seq: str) -> NDArray:
+        """
+        Convert a sequence into an integer array.
+
+        :param seq: The input sequence.
+        :return: The integer array representing the sequence.
+        """
         # prepare a sequence with its reverse complement in byte array
         pseq = np.array([seq + reverse_complement(seq)], dtype=bytes)
         # use view to cast to integer array
@@ -59,16 +69,30 @@ class KmerCounter:
 
 
     @staticmethod
-    def translate_into_kmer_indices(iseq, k, table):
+    def translate_into_kmer_indices(iseq: NDArray, k: int, table: NDArray) -> NDArray:
+        """
+        Translate the integer sequence into kmer indices using the kmer table.
+
+        :param iseq: The integer array representing the sequence.
+        :param k: The length of the kmers.
+        :param table: The kmer table.
+        :return: The array of kmer indices.
+        """
         # use indexing to get unique numbers for imers
         ituple = tuple(iseq[i: -(k-i+1)] for i in range(k))
         imer_t = table[ituple]
         return imer_t
 
 
-    def count(self, seq, k):
-        # input seq is normal concatenated string
-        # turn into integer array first
+    def count(self, seq: str, k: int) -> Dict[str, int]:
+        """
+        Count the occurrences of kmers in the given sequence.
+
+        :param seq: The input sequence.
+        :param k: The length of the kmers.
+        :return: The dictionary of kmer counts.
+        """
+        # str to integer array
         iseq = self.integer_seq(seq)
         # grab the correct pre-computed table
         table = getattr(self, f't{k}')
@@ -82,7 +106,13 @@ class KmerCounter:
 
 
     @staticmethod
-    def expected_tetramer_frequencies(km):
+    def expected_tetramer_frequencies(km: List[Dict[str, int]]) -> Dict[str, float]:
+        """
+        Calculate the expected tetramer frequencies.
+
+        :param km: The list of kmer count dictionaries for di-, tri-, and tetramers.
+        :return: The dictionary of expected tetramer frequencies.
+        """
         tetra_exp = {}
         tetra = km[2]
         for tet in tetra:
@@ -91,7 +121,14 @@ class KmerCounter:
 
 
     @staticmethod
-    def estimate_zscores(km, tetra_exp):
+    def estimate_zscores(km: List[Dict[str, int]], tetra_exp: Dict[str, float]) -> Dict[str, float]:
+        """
+        Estimate the z-scores for tetramers.
+
+        :param km: list of kmer count dictionaries for di-, tri-, and tetramers.
+        :param tetra_exp: dictionary of expected tetramer frequencies.
+        :return: dictionary of tetramer z-scores.
+        """
         tetra_sd = {}
         for tet, exp in list(tetra_exp.items()):
             den = km[0][tet[1:3]]
@@ -104,8 +141,13 @@ class KmerCounter:
         return tetra_z
 
 
-    def tetra_zscores(self, seq):
-        # wrapper to get tetramer zscores from a sequence
+    def tetra_zscores(self, seq: str) -> Dict[str, float]:
+        """
+        WRAPPER to calculate the z-scores for tetramers in the given sequence.
+
+        :param seq: The input sequence.
+        :return: The dictionary of tetramer z-scores.
+        """
         # first count 2,3,4-mers
         kmers = [dict()] * 3
         kmers[0] = self.count(seq, 2)
@@ -119,37 +161,23 @@ class KmerCounter:
 
 
 class TetramerDist:
-    """
-    this object takes sequence objects, not raw sequences
-    this is in order to not recompute kmers
-    """
 
     def __init__(self):
+        """
+        This object takes sequence objects, not raw sequences.
+        To avoid recomputing kmers.
+        """
         self.kmc = KmerCounter()
 
 
-    # def pearson_cor(self, seqo1, seqo2):
-    #     # check if sequences already have tetramer zscores
-    #     tz1 = getattr(seqo1, 'tetramer_zscores', None)
-    #     tz2 = getattr(seqo2, 'tetramer_zscores', None)
-    #     # calculate them if not
-    #     if not tz1:
-    #         seqo1.tetramer_zscores = self.kmc.tetra_zscores(seq=seqo1.seq)
-    #     if not tz2:
-    #         seqo2.tetramer_zscores = self.kmc.tetra_zscores(seq=seqo2.seq)
-    #     # grab the zscores
-    #     t1 = seqo1.tetramer_zscores
-    #     t2 = seqo2.tetramer_zscores
-    #     # intersection to get all 4mers present in both sequences
-    #     tetramers = set(sorted(t1.keys())) & set(sorted(t2.keys()))
-    #     z1 = [t1[t] for t in tetramers]
-    #     z2 = [t2[t] for t in tetramers]
-    #     # calculate pearson correlation
-    #     cor = pearsonr(z1, z2)
-    #     return cor
+    def euclidean_dist(self, seqo1: Any, seqo2: Any) -> float:
+        """
+        Calculate the Euclidean distance between two sequence objects.
 
-
-    def euclidean_dist(self, seqo1, seqo2):
+        :param seqo1: first sequence object.
+        :param seqo2: second sequence object.
+        :return: Euclidean distance.
+        """
         # check if kmers have already been counted
         t1 = getattr(seqo1, 'tmers', None)
         t2 = getattr(seqo2, 'tmers', None)
@@ -179,24 +207,41 @@ class TetramerDist:
 class IntraProb:
 
     def __init__(self):
-        from scipy.stats import norm
-        mean = 0
-        std = 0.01037897 / 2
-        mean2 = 0.0676654
-        std2 = 0.03419337
-        self.norm_intra = norm(mean, std)
-        self.norm_inter = norm(mean2, std2)
+        """
+        This class calculates the intra-probability and threshold values.
+        """
+        self.mean = 0
+        self.std = 0.01037897 / 2
+        self.mean2 = 0.0676654
+        self.std2 = 0.03419337
+        # self.t = self.calc_threshold()
+        self.t = 0.036  # hard-coded to avoid scipy dependency
 
 
-    def intra_prob(self, e):
-        prob = self.norm_intra.pdf(e) / (self.norm_inter.pdf(e) + self.norm_intra.pdf(e))
-        return prob
-
-    def calc_threshold(self):
-        e = np.arange(0, 0.1, 0.001)
-        ip = self.intra_prob(e)
-        t = e[np.where(ip > 1e-10)][-1]
-        return t
+    # def intra_prob(self, e: NDArray) -> float:
+    #     """
+    #     Calculate the intra-probability.
+    #
+    #     :param e: input value
+    #     :return: intra-probability.
+    #     """
+    #     from scipy.stats import norm
+    #     self.norm_intra = norm(self.mean, self.std)
+    #     self.norm_inter = norm(self.mean2, self.std2)
+    #     prob = self.norm_intra.pdf(e) / (self.norm_inter.pdf(e) + self.norm_intra.pdf(e))
+    #     return prob
+    #
+    #
+    # def calc_threshold(self) -> float:
+    #     """
+    #     Calculate the threshold value based on the empirical parameters.
+    #
+    #     :return: threshold value.
+    #     """
+    #     e = np.arange(0, 0.1, 0.001)
+    #     ip = self.intra_prob(e)
+    #     t = e[np.where(ip > 1e-10)][-1]
+    #     return t
 
 
 # instantiate to make available when imported
@@ -206,8 +251,8 @@ tetramer_zscores = kmc.tetra_zscores                    # wrapper for tetramer z
 
 tdist = TetramerDist()
 euclidean_dist = tdist.euclidean_dist                   # distance function for sequence OBJECTS
-# pearson_dist = tdist.pearson_cor                        # distance function for sequence OBJECTS
-euclidean_threshold = IntraProb().calc_threshold()      # constant from empirical parameters
+# pearson_dist = tdist.pearson_cor                      # distance function for sequence OBJECTS
+euclidean_threshold = IntraProb().t                     # constant from empirical parameters
 
 
 
