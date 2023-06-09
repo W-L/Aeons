@@ -5,8 +5,11 @@ from collections import defaultdict, Counter
 from copy import deepcopy
 from pathlib import Path
 from shutil import copy
+from typing import List, Optional, Tuple
 
 import numpy as np
+from numpy.typing import NDArray
+
 
 from .aeons_paf import PafLine, Paf
 from .aeons_utils import execute, find_exe, write_logs, random_id, find_blocks_generic, load_gfa
@@ -19,14 +22,26 @@ from .aeons_benefit import benefit_bins, calc_fragment_benefit, score_array
 
 class Dependencies:
     def __init__(self):
-        self.mm2 = find_exe("minimap2")
-        # logging.info(f'mm2: {self.mm2}')
-        if not self.mm2:
-            sys.exit("Dependency minimap2 not found in path")
-        self.paf2gfa = find_exe("paf2gfa")
-        # logging.info(f'paf2gfa: {self.paf2gfa}')
-        if not self.paf2gfa:
-            sys.exit("Dependency paf2gfa (gfatools) not found in path")
+        """
+        Initialize the Dependencies class.
+
+        :raises SystemExit: If any of the dependencies is not found in the system path.
+        """
+        self.dependencies = ["minimap2", "paf2gfa", "miniasm"]
+        self.check_dependencies()
+
+
+    def check_dependencies(self):
+        """
+        Check if all dependencies are present in the system path.
+
+        :raises SystemExit: If any of the dependencies is not found in the system path.
+        """
+        for dependency in self.dependencies:
+            setattr(self, dependency, find_exe(dependency))
+            # logging.info(f'{dependency}: {getattr(self, dependency)}')
+            if not getattr(self, dependency):
+                sys.exit(f"Dependency {dependency} not found in path")
 
 
 
