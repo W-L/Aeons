@@ -5,11 +5,11 @@ from collections import defaultdict, Counter
 from copy import deepcopy
 from pathlib import Path
 from shutil import copy
-from typing import List, Optional, Tuple
+import time
+from typing import List, Optional, Tuple, Dict, Union, Set, Generator, Any
 
 import numpy as np
 from numpy.typing import NDArray
-
 
 from .aeons_paf import PafLine, Paf
 from .aeons_utils import execute, find_exe, write_logs, random_id, find_blocks_generic, load_gfa
@@ -18,6 +18,9 @@ from .aeons_kmer import euclidean_dist, euclidean_threshold
 from .aeons_mapper import Indexer
 from .aeons_benefit import benefit_bins, calc_fragment_benefit, score_array
 
+
+
+Edge = Tuple[str, str]
 
 
 class Dependencies:
@@ -49,26 +52,34 @@ class Dependencies:
 
 class SequenceAVA:
 
-    def __init__(self, paf, filters, tetra=False):
+    def __init__(self, paf: str, filters, tetra: bool = False):
+        """
+        Initialize the SequenceAVA object.
+
+        :param paf: Path to the PAF file.
+        :param filters: List of filters to apply.
+        :param tetra: Whether to use the tetramer distance to filter overlaps. Defaults to False.
+        """
         self.paf = paf
         self.gfa = f'{paf}.gfa'
         self.filters = filters
-        self.tetra = tetra    # whether to use the tetramer distance to filter overlaps
+        self.tetra = tetra
         # container to keep overlaps
         # save paf lines as qname-tname with alphanum sort
         self.links = defaultdict(lambda: defaultdict(PafLine))
         self.paf_links = f"{paf}.links.paf"
-
-        self.dep = Dependencies()  # TODO
-
-
-    def load_dependencies(self):
         self.dep = Dependencies()
 
 
-    def load_ava(self, paf, seqpool):
-        # load all entries from a paf file as PafLines
-        # filter the entries while loading
+
+    def load_ava(self, paf: str, seqpool: "SequencePool") -> Tuple[Dict[Edge, PafLine], Set]:
+        """
+        Load all entries from a PAF file as PafLines and filter the entries while loading.
+
+        :param paf: Path to the PAF file.
+        :param seqpool: SequencePool
+        :return: A tuple containing containments and overlappers.
+        """
         self.trims = []  # used for trimming
         self.overlaps = {}  # used for trimming
         containments = {}  # collect, used for coverage increments
@@ -96,11 +107,10 @@ class SequenceAVA:
                 # append the alignment to both the query and the target
                 ovl += 1
                 self.overlaps[(rec.qname, rec.tname)] = rec
-                # TODO new
+                # check if we have an overlap of the two already
                 if rec.tname in self.links[rec.qname].keys():
                     if rec.s1 < self.links[rec.qname][rec.tname].s1:
-                        # we already have an overlap between the two
-                        # and the previous recorded one had higher s1
+                        # previously recorded overlap has higher s1
                         continue
 
                 self.links[rec.qname][rec.tname] = rec
@@ -125,8 +135,12 @@ class SequenceAVA:
 
 
 
-    def remove_links(self, sequences):
-        # remove overlaps of certain sequences
+    def remove_links(self, sequences: List[str]) -> None:
+        """
+        Remove overlaps of certain sequences.
+
+        :param sequences: List of sequence IDs to remove overlaps from.
+        """
         for sid in sequences:
             # targets for overlaps where sid is "query"
             targets = self.links[sid].keys()
@@ -136,15 +150,24 @@ class SequenceAVA:
             for t in targets:
                 self.links[t].pop(sid, None)
 
-    def remove_specific_link(self, s1, s2):
-        # just remove one specific link from the overlaps
+
+    def remove_specific_link(self, s1: str, s2: str) -> None:
+        """
+        Remove a specific link from the overlaps.
+
+        :param s1: First sequence header.
+        :param s2: Second sequence header.
+        """
         self.links[s1].pop(s2, None)
         self.links[s2].pop(s1, None)
 
 
-    def to_be_trimmed(self):
-        # after classification use the records that need to be trimmed
-        # and find the coordinates for trimming
+    def to_be_trimmed(self) -> Dict[str, Tuple[int, int, Any]]:
+        """
+        After classification, find the coordinates for trimming.
+
+        :return: A dictionary containing sequences to be trimmed and their corresponding coordinates.
+        """
         trim = self.trims
         # save the name and coordinates for trimming
         to_trim = {}
@@ -156,9 +179,14 @@ class SequenceAVA:
         return to_trim
 
 
-    def trim_success(self, trim_dict, overlaps):
-        # after the trimming, check which ones were successful
-        # in order to remove the originals and the not successful ones
+    def trim_success(self, trim_dict: Dict[str, Tuple[int, int, Any]], overlaps: Dict[Tuple[str, str], Any]) -> Set[str]:
+        """
+        Check which trimming attempts were successful.
+
+        :param trim_dict: Dictionary containing sequences to be trimmed and their coordinates.
+        :param overlaps: Dictionary of overlaps.
+        :return: A set of sequences to be removed.
+        """
         success, unsuccess = set(), set()
         trim = set(trim_dict.keys())
         if not trim:
@@ -182,7 +210,14 @@ class SequenceAVA:
 
 
 
-    def check_occupancy(self, avas, occupied):
+    def check_occupancy(self, avas: Dict[Tuple[str, str], Any], occupied: Set[Tuple[str, str]]) -> Dict[Tuple[str, str], Any]:
+        """
+        Check whether targets of some node are already occupied.
+
+        :param avas: Dictionary of AVA objects.
+        :param occupied: Set of occupied targets.
+        :return: Dictionary of unoccupied targets.
+        """
         # check whether targets of some node are already occupied
         not_occ = {(tname, tside): rec for (tname, tside), rec in avas.items()
                    if (tname, tside) not in occupied}
@@ -190,8 +225,12 @@ class SequenceAVA:
 
 
 
-    def links2paf(self, paf_out):
-        # write overlaps to paf file
+    def links2paf(self, paf_out: str) -> None:
+        """
+        Write overlaps to a PAF file.
+
+        :param paf_out: Output file path for the PAF file.
+        """
         written = set()
         with open(paf_out, 'w') as fh:
             for node, target_dict in self.links.items():
@@ -207,7 +246,14 @@ class SequenceAVA:
 
 
 
-    def paf2gfa_fpa(self, paf_in, gfa_out):
+    def paf2gfa_fpa(self, paf_in: str, gfa_out: str) -> bool:
+        """
+        Transform the PAF file to GFA format.
+
+        :param paf_in: Input PAF file path.
+        :param gfa_out: Output GFA file path.
+        :return: True if transformation is successful, False otherwise.
+        """
         # transform to GFA file for further processing
         if not os.path.getsize(paf_in):
             logging.info("no overlaps for merging")
@@ -221,26 +267,38 @@ class SequenceAVA:
 
 
 
-    def paf2gfa_gfatools(self, paf, fa, gfa=None):
-        # use gfatools to generate the graph and unitigs
+    def paf2gfa_gfatools(self, paf: str, fa: str, gfa: Optional[str] = None) -> str:
+        """
+        Use gfatools to generate the graph and unitigs from a PAF file and a FASTA file.
+
+        :param paf: Input PAF file path.
+        :param fa: Input FASTA file path.
+        :param gfa: Optional output GFA file path.
+        :return: The generated GFA content as a string or empty string
+        """
         if not os.path.getsize(paf):
             logging.info("no overlaps for merging")
-            return False
+            return ""
+        paf2gfa = getattr(self.dep, "paf2gfa")
 
-        comm = f"{self.dep.paf2gfa} -i {fa} -u -c {paf}"
+        comm = f"{paf2gfa} -i {fa} -u -c {paf}"
         stdout, stderr = execute(comm)
-        # writing is not necessary if we use stdout of process
+        # optionally write to file
         if gfa:
             with open(gfa, 'w') as fh:
                 fh.write(stdout)
-        # if stderr:
-        #     logging.info(f"stderr: \n {stderr}")
         return stdout
 
 
     @staticmethod
-    def source_union(edges0, edges1):
-        # given some sets of edge dicts, return the union of source nodes
+    def source_union(edges0: Dict[Edge, PafLine], edges1: Dict[Edge, PafLine]) -> Set:
+        """
+        Given containment dictionaries (edges), return the union of source nodes.
+
+        :param edges0: First containment dictionary.
+        :param edges1: Second containment dictionary
+        :return: Union of source nodes.
+        """
         sources0 = zip(*edges0.keys())
         sources1 = zip(*edges1.keys())
         try:
@@ -266,8 +324,8 @@ class Sequence:
         header: str,
         seq: str,
         cov: Optional[NDArray] = None,
-        merged_components: Optional[List[str]] = None,
-        merged_atoms: Optional[List[str]] = None,
+        merged_components: Optional[Set[str]] = None,
+        merged_atoms: Optional[Set[str]] = None,
         cap_l: bool = False,
         cap_r: bool = False,
     ):
@@ -421,11 +479,11 @@ class Sequence:
         assert self.cov_chunked.shape[0] == self.scores.shape[0]
 
 
-    def contig_benefits(self, mu: int, ccl: NDArray, node_size: int):
+    def contig_benefits(self, mu: float, ccl: NDArray, node_size: int):
         """
         Calculate benefits for the contig.
 
-        :param mu: The mu value.
+        :param mu: Length of anchor bases
         :param ccl: The ccl value.
         :param node_size: The node size.
         """
@@ -531,9 +589,23 @@ class Sequence:
 
 
 class SequencePool:
+    def __init__(
+        self,
+        sequences: Optional[Dict[str, Union[str, 'Sequence']]] = None,
+        name: str = "dummy",
+        min_len: int = 3000,
+        out_dir: str = "dummy",
+        threads: int = 6
+    ):
+        """
+        Initialize a SequencePool object. Unified pool for reads and contigs with persistent AVA
 
-    def __init__(self, sequences=None, name="dummy", min_len=3000, out_dir="dummy", threads=6):
-        # a unified pool for reads and contigs with persistent AVA
+        :param sequences: Dictionary of raw sequences. Keys are headers, values are either raw seqs or Sequence objects
+        :param name: Name of the sequence pool.
+        :param min_len: Minimum length of sequences to be included in the pool. Default is 3000.
+        :param out_dir: Output directory.
+        :param threads: Number of threads to use. Default is 6.
+        """
         self.min_len = min_len
         self.out_dir = out_dir
         self.sequences = dict()
@@ -541,83 +613,89 @@ class SequencePool:
         self.name = name
 
         if sequences:
-            # the given sequences can be raw or Sequence objects
             input_type = type(list(sequences.values())[0])
+            # raw sequences
             if input_type == str:
                 self._ingest_dict(seqs=sequences)
+            # Sequence objects
             elif input_type == Sequence:
                 self.sequences = sequences
             else:
                 print("SequencePool input type not supported")
 
         self.polished = {}
-
         # filenames
         self.fa = f'{name}.fa'  # fasta of whole pool
         self.contig_fa = f'{name}.contig.fa'  # fasta of long sequences to map against
         self.ava = f'{name}.ava'  # ava in paf
         self.gfa = f'{name}.gfa'
-
-        self.dep = Dependencies()  # TODO
-
-
-
-    def load_dependencies(self):
         self.dep = Dependencies()
 
 
-    def headers(self):
+
+
+
+    def headers(self) -> Set[str]:
+        """
+        Get the set of sequence headers in the SequencePool.
+
+        :return: Set of sequence headers.
+        """
         return set(self.sequences.keys())
 
 
-    def seqdict(self):
-        # convenience raw sequence dict
+    def seqdict(self) -> Dict[str, str]:
+        """
+        Get a dictionary representation of the raw sequences in the SequencePool.
+
+        :return: Dictionary of sequence headers and their corresponding raw sequences.
+        """
         return {header: seqo.seq for header, seqo in self.sequences.items()}
 
 
-    def total_bases(self):
-        # sum the total bases in the pool
-        return np.sum([len(seqo.seq) for header, seqo in self.sequences.items()])
+    def total_bases(self) -> int:
+        """
+        Get the total number of bases in the SequencePool.
+
+        :return: Total number of bases.
+        """
+        return int(np.sum([len(seqo.seq) for header, seqo in self.sequences.items()]))
 
 
-    def count_coverage(self):
-        # check the coverage of all sequences in the pool
-        cov_counts = np.zeros(shape=200)
-        cov_means = np.zeros(shape=1000)
-        i = 0
-        for header, seqo in self.sequences.items():
-            seqo_counts = np.bincount(seqo.cov.astype('int'))
-            cov_counts[:seqo_counts.shape[0]] += seqo_counts
-            seqo_mean = np.mean(seqo.cov)
-            cov_means[i] = seqo_mean
-            i += 1
-            if header.startswith("SRR"):
-                continue
-            # print(header)
-            # print(seqo_mean)
-        cov_counts_t = np.trim_zeros(cov_counts, trim='b')
-        cov_means_t = np.trim_zeros(cov_means, trim='b')
-        return cov_counts_t, cov_means_t
+    def is_empty(self) -> bool:
+        """
+        Check if the pool is empty
+
+        :return: True if no sequences in pool, False otherwise
+        """
+        empty = True if len(self.sequences) == 0 else False
+        return empty
 
 
-    def ingest(self, seqs):
-        # add a pile of sequences to the pool
-        # can read from a dict, or add an existing pool
+    def ingest(self, seqs: Union[Dict[str, str], 'SequencePool']) -> None:
+        """
+        Add a pile of sequences to the SequencePool.
+
+        :param seqs: Dictionary of raw sequences or an existing SequencePool to add.
+        """
         if type(seqs) == dict:
             skipped = self._ingest_dict(seqs=seqs)
             logging.info(f"ingested: {len(seqs) - skipped} pool size: {len(self.sequences.keys())}")
-
         elif type(seqs) == SequencePool:
             self._ingest_pool(new_pool=seqs)
             logging.info(f"ingested: {len(seqs.sequences)} pool size: {len(self.sequences.keys())}")
-
         else:
             logging.info("seqs need to be dict, or SequencePool")
 
 
 
-    def _ingest_dict(self, seqs):
-        # ingest a dictionary of raw sequences
+    def _ingest_dict(self, seqs: Dict[str, str]) -> int:
+        """
+        Ingest a dictionary of raw sequences.
+
+        :param seqs: Dictionary of raw sequences.
+        :return: Number of skipped sequences.
+        """
         skipped = 0
         for rid, seq in seqs.items():
             if len(seq) > self.min_len:
@@ -629,48 +707,63 @@ class SequencePool:
         return skipped
 
 
-    def _ingest_pool(self, new_pool):
-        # if the new sequences are already in a pool
-        # this is the case after merging sequences for example
+    def _ingest_pool(self, new_pool: 'SequencePool') -> None:
+        """
+        Ingest sequences from an existing SequencePool, e.g. after merging Sequences
+
+        :param new_pool: Existing SequencePool to ingest sequences from.
+        """
         for rid, seqo in new_pool.sequences.items():
             if len(seqo.seq) > self.min_len:
                 self.sequences[rid] = seqo
 
 
+    def run_ava(self, sequences: Dict[str, str], fa: str, paf: str, base_level: bool = False) -> str:
+        """
+        Perform All-Versus-All (AVA) comparison of sequences using minimap2.
 
-    def run_ava(self, sequences, fa, paf, base_level=False):
-        # perform AVA
-        # minimap2 -x ava-ont -t8 {input} {input} >{output}
+        :param sequences: Dictionary of sequences.
+        :param fa: Filename for temporary sequence file.
+        :param paf: Filename for the output PAF file.
+        :param base_level: Whether to perform base-level AVA. Default is False.
+        :return: Filename of PAF file.
+        """
         logging.info(f"Running ava for: {len(sequences)} queries")
-        # write current pool to file first
+        # write current pool to file
         self.write_seq_dict(seq_dict=sequences, file=fa)
-        # then perform all vs all
-        if not self.dep.mm2:
-            logging.info("could not find minimap2")
+        mm2 = getattr(self.dep, "minimap2")
 
-        comm = f'{self.dep.mm2} -x ava-ont -t{self.threads} {fa} {fa} >{paf}'
+        comm = f'{mm2} -x ava-ont -t{self.threads} {fa} {fa} >{paf}'
         if base_level:
-            comm = f'{self.dep.mm2} -cx ava-ont -t{self.threads} {fa} {fa} >{paf}'
-        import time
+            comm = f'{mm2} -cx ava-ont -t{self.threads} {fa} {fa} >{paf}'
+
         tic = time.time()
         stdout, stderr = execute(comm)
         toc = time.time()
-        logging.info(f"timing: {toc - tic}")
+        logging.info(f"t: {toc - tic}")
         if os.path.exists(f'{self.out_dir}/logs'):
             write_logs(stdout, stderr, f'{self.out_dir}/logs/ava')
         return paf
 
 
 
-    def initial_asm_miniasm(self, c=3, trds=8):
-        # write sequences to file
+    def initial_asm_miniasm(self, c: int = 3, trds: int = 8) -> 'SequencePool':
+        """
+        Perform initial assembly using miniasm.
+
+        :param c: Minimum coverage, fwd to miniasm. Default is 3.
+        :param trds: Number of threads. Default is 8.
+        :return: SequencePool object containing assembled unitigs.
+        """
         sfile = f'{self.name}.init_reads.fa'
         self.write_seq_dict(self.seqdict(), file=sfile)
+        mm2 = getattr(self.dep, "minimap2")
+        miniasm = getattr(self.dep, "miniasm")
 
-        comm0 = f'{self.dep.mm2} -x ava-ont -t{trds} {sfile} {sfile} >{sfile}.ava'
+        comm0 = f'{mm2} -x ava-ont -t{trds} {sfile} {sfile} >{sfile}.ava'
         stdout, stderr = execute(comm0)
         write_logs(stdout, stderr, f'{self.out_dir}/contigs/init/init_ava')
-        comm1 = f"miniasm -f {sfile} {sfile}.ava -c{c} >{self.name}.init.gfa"  # TODO make dep
+        comm1 = f"{miniasm} -f {sfile} {sfile}.ava -c{c} >{self.name}.init.gfa"
         stdout, stderr = execute(comm1)
         write_logs(stdout, stderr, f'{self.out_dir}/contigs/init/init_asm')
 
@@ -680,69 +773,64 @@ class SequencePool:
         for header, seqo in contig_pool.sequences.items():
             if header[-1] == 'c':
                 seqo.acceptor = False
-
         return contig_pool
 
 
 
-    @staticmethod
-    def filter_seqs_length(sequence_dict, min_len):
-        # UNUSED, now done when creating a sequence pool
-        # filter sequences in a dictionary by length
-        seq_dict_filt = {sid: seq for sid, seq in sequence_dict.items() if len(seq) > min_len}
-        length_diff = len(sequence_dict) - len(seq_dict_filt)
-        logging.info(f'length filter: {length_diff}')
-        return seq_dict_filt
+    def add2ava(self, new_sequences: 'SequencePool') -> Tuple[str, str]:
+        """
+        Add new sequences to the All-Versus-All (AVA) comparisons.
+        Instead of rerunning complete ava, run ava for new sequences and map new sequences onto existing ones
 
-
-
-
-
-    def add2ava(self, new_sequences):
-        # instead of rerunning complete ava, run ava for new sequences
-        # and map new sequences onto existing ones
-        # then merge: seqpool ava, new ava, new onto seqpool
+        :param new_sequences: SequencePool object containing the new sequences.
+        :return: Filenames of the new AVA file and the file containing mappings of new seqs to previous ones.
+        """
         logging.info(f'adding to ava: {len(new_sequences.sequences)}')
-        # write current pool to file
         self.write_seq_dict(seq_dict=self.seqdict(), file=self.fa)
-        # declare filenames for new reads that will be added
+        # declare new filenames
         new_fa = f'{self.fa}.new'
         new_ava = f'{self.ava}.new'
         new_onto_pool = f'{self.fa}.new.onto_pool'
         # write new reads to file
         self.write_seq_dict(seq_dict=new_sequences.seqdict(), file=new_fa)
         # ava of new sequences
-        if not self.dep.mm2:
-            logging.info("could not find minimap2")
-
-        comm = f'{self.dep.mm2} -x ava-ont -t{self.threads} {new_fa} {new_fa} >{new_ava}'
+        mm2 = getattr(self.dep, "minimap2")
+        comm = f'{mm2} -x ava-ont -t{self.threads} {new_fa} {new_fa} >{new_ava}'
         stdout, stderr = execute(comm)
         write_logs(stdout, stderr, f'{self.out_dir}/logs/ava_add')
         # mapping new sequences to previous pool
-        comm = f'{self.dep.mm2} -x map-ont -w5 -e0 -m100 -r2k -t{self.threads} {self.fa} {new_fa} >{new_onto_pool}'
+        comm = f'{mm2} -x map-ont -w5 -e0 -m100 -r2k -t{self.threads} {self.fa} {new_fa} >{new_onto_pool}'
         stdout, stderr = execute(comm)
         write_logs(stdout, stderr, f'{self.out_dir}/logs/map2pool')
         # return filenames to be ingested as AVA
         return new_ava, new_onto_pool
 
 
-    def remove_sequences(self, sequences):
-        # given some ids, remove them from the readpool
-        # e.g. after making new paths, we want to remove the sequences used to construct them
-        # as soon as a read is used, it can not contribute to any other alignment
+    def remove_sequences(self, sequences: List[str]) -> None:
+        """
+        Remove sequences from the pool based on their IDs.
+        Once a read is used, it can not contribute to other alignments
+
+        :param sequences: List of sequence IDs to remove.
+        """
+        pre = len(self.sequences)
         popped = 0
         for sid in sequences:
             self.sequences.pop(sid, None)
             popped += 1
-        logging.info(f'pool size: {len(self.sequences)}')
-        logging.info(f'popped {popped}')
+        post = len(self.sequences)
+        logging.info(f'Removed: {popped} ({pre} {post})')
 
 
 
 
-    def trim_sequences(self, trim_dict):
-        # takes a dictionary of [sid: (start:stop, other_name)]
-        # to trim down in order to create valid alignments
+    def trim_sequences(self, trim_dict: Dict[str, Tuple[int, int, str]]) -> Dict[str, str]:
+        """
+        Trim sequences in order to create valid alignments.
+
+        :param trim_dict: Dictionary of [sid: (start:stop, other_name)] for trimming sequences.
+        :return: Dictionary of trimmed sequences.
+        """
         trimmed_seqs = {}
         other_seqs = {}
         valid_ids = set()
@@ -760,7 +848,6 @@ class SequencePool:
         for sid, (start, stop, other) in trim_dict.items():
             nsid = sid + '%'
             # skip sequences that were not found in previous step
-            # TODO find out why this happens
             if nsid not in valid_ids:
                 continue
             seqo = trimmed_seqs[nsid]
@@ -775,25 +862,30 @@ class SequencePool:
             seqo.cov = seqo.cov[mask]
             seqo.header = nsid
 
-
         trimmed_pool = SequencePool(sequences=trimmed_seqs)
         other_pool = SequencePool(sequences=other_seqs)
         # ingest pool of trimmed sequences
         self.ingest(seqs=trimmed_pool)
 
         # combine sequence dicts for mapping
-        # seq_dict = trimmed_pool.seqdict() | other_pool.seqdict()  # TODO
         seq_dict = dict(trimmed_pool.seqdict(), **other_pool.seqdict())
         return seq_dict
 
 
-    def get_next_increment_edges(self, edges, previous_edges=None):
-        # if no argument given, get the edges with in-degree of 0
+    def get_next_increment_edges(self, edges: Set[Edge], previous_edges: Set[Edge] = None) -> Tuple[Set[Edge], Set[Edge]]:
+        """
+        Get the next increment edges based on the given edges and previous edges.
+        if no previous edges are given, get the edges with in-degree of 0: This is the start of the algorithm
+
+        :param edges: Set of edges.
+        :param previous_edges: Set of previous edges.
+        :return: Tuple containing the remaining edges and the next increment edges.
+        """
         if not previous_edges:
             sources, targets = zip(*edges)
             next_sources = set(sources) - set(targets)
-        # otherwise grab the edges starting at the previous targets
         else:
+            # otherwise grab the edges starting at the previous targets
             next_sources = [t for (s, t) in previous_edges]
         # get the next edges to increment
         next_edges = {(s, t) for (s, t) in edges if s in next_sources}
@@ -803,13 +895,19 @@ class SequencePool:
         return edges, next_edges
 
 
-    def affect_increment(self, source, target, rec, edge_multiplicity):
-        # relevant coordinates of this containment
+    def affect_increment(self, source: str, target: str, rec: PafLine, edge_multiplicity: float) -> None:
+        """
+        Effect the increment by adjusting the coverage and adding the source as a constituent of the target.
+
+        :param source: Source sequence ID.
+        :param target: Target sequence ID.
+        :param rec: Mapping record.
+        :param edge_multiplicity: Edge multiplicity.
+        """
+        # grab relevant coordinates of this containment
         ostart, oend, olen, cstart, cend, clen = rec.grab_increment_coords()
-
-        # grab the source coverage
+        # grab source coverage
         cont_cov = self.sequences[source].cov[cstart: cend].copy()
-
         # adjust length of coverage array
         if clen == olen:
             pass
@@ -837,29 +935,48 @@ class SequencePool:
             self.sequences[target].atoms.add(source)
 
 
-    def affect_increments(self, next_edges, containment, edge_multiplicity):
-        # loop over the next set of edges to affect the collected increments
+    def affect_increments(self, next_edges: Set[Edge], containment: Dict[Edge, PafLine], edge_multiplicity: Dict[str, float] = None) -> None:
+        """
+        Effect the increments based on the next set of edges.
+
+        :param next_edges: Set of next edges.
+        :param containment: Containment records.
+        :param edge_multiplicity: Edge multiplicity.
+        """
+        # loop over the next set of edges to effect the collected increments
         for (source, target) in next_edges:
             rec = containment[(source, target)]
             # grab edge multiplicity modifier, in case of parallel edges
-            em = edge_multiplicity[source]
+            if edge_multiplicity is None:
+                em = 1
+            else:
+                em = edge_multiplicity[source]
             self.affect_increment(source, target, rec, em)
 
 
     @staticmethod
-    def find_edge_multiplicity(edges):
+    def find_edge_multiplicity(edges: Set[Edge]):
+        """
+        Find the edge multiplicity for the given edges.
+
+        :param edges: Set of edges.
+        """
         sources, targets = zip(*edges)
         source_counts = Counter(sources)
         return source_counts
 
 
-    def increment(self, containment):
-        # use the records of containment to increase the coverage counts & borders
-        # containment = (contained, container) : rec
+    def increment(self, containment: Dict[Edge, PafLine]) -> set:
+        """
+        Increment the coverage counts based on containment records.
+
+        :param containment: Containment records.
+        :return: Set of IDs of the contained sequences.
+        """
         edges = set(containment.keys())
-        # if there are no increments to do
         if not edges:
-            return []
+            # nothing to do
+            return set()
 
         # debugging
         # import sys
@@ -870,20 +987,20 @@ class SequencePool:
         # get the first edges to increment, i.e. those with 0 in-degree
         edges, next_edges = self.get_next_increment_edges(edges, previous_edges=None)
         if not next_edges:
-            return []
+            return set()
         edge_multiplicity = self.find_edge_multiplicity(next_edges)
         self.affect_increments(next_edges, containment, edge_multiplicity)
         previous_edges = next_edges
 
         while len(edges) > 0:
-            # get the next edges to deal with
+            # get the next edges
             edges, next_edges = self.get_next_increment_edges(edges, previous_edges=previous_edges)
             if not next_edges:
-                return []
+                return set()
             edge_multiplicity = self.find_edge_multiplicity(next_edges)
             self.affect_increments(next_edges, containment, edge_multiplicity)
 
-            # circular containment relationships can trap us here
+            # circular containment relationships could trap us here
             if len(next_edges) == len(previous_edges):
                 break
             previous_edges = next_edges
@@ -893,7 +1010,13 @@ class SequencePool:
         return contained_ids
 
 
-    def reset_temperature(self, sids, t=50):
+    def reset_temperature(self, sids: Set[str], t: int = 50) -> None:
+        """
+        Reset the temperature of active reads to the given value.
+
+        :param sids: Set of sequence IDs.
+        :param t: Temperature value.
+        """
         # give active reads a boost in temperature
         for s in sids:
             try:
@@ -903,32 +1026,44 @@ class SequencePool:
                 pass
 
 
-    def decrease_temperature(self, lim):
-        # decrease the temperature of all reads by 1
-        # if a read is longer than lim, we never ignore it
+    def decrease_temperature(self, lim: int) -> Set[str]:
+        """
+        Decrease the temperature of all reads and return the frozen sequences.
+        Sequences longer than lim never freeze
+
+        :param lim: Length limit.
+        :return: Set of frozen sequence headers.
+        """
         frozen_seqs = set()
         for header, seqo in self.sequences.items():
             if len(seqo.seq) < lim:
                 seqo.temperature -= 1
-                hot = seqo.check_temperature()
-                if not hot:
+                if not seqo.is_hot():
                     frozen_seqs.add(header)
         logging.info(f"frozen seqs: {len(frozen_seqs)}")
         return frozen_seqs
 
 
-    def declare_contigs(self, min_contig_len):
-        # collect a subdict of sequences that are longer than some limit
+    def declare_contigs(self, min_contig_len: int) -> 'SequencePool':
+        """
+        Declare contigs based on a minimum contig length. These will be used for strategy generation
+
+        :param min_contig_len: Minimum contig length.
+        :return contig_pool: Pool of contigs
+        """
         contigs = {header: seqo for header, seqo in self.sequences.items() if len(seqo.seq) > min_contig_len}
-        if not contigs:
-            return False
         contig_pool = SequencePool(sequences=contigs)
         return contig_pool
 
 
+    def polish_sequences(self, contigs: 'SequencePool', read_sources: Dict[str, str]) -> list:
+        """
+        Polish the contig sequences using racon and the read source files.
 
-    def polish_sequences(self, contigs, read_sources):
-        # loop over the contig pool and polish them with racon
+        :param contigs: Contig sequences.
+        :param read_sources: Read sources.
+        :return: List of newly polished contigs.
+        """
         polish_count = 0
         new_polished = []
         for contig_header, contig in contigs.sequences.items():
@@ -943,7 +1078,14 @@ class SequencePool:
         return new_polished
 
 
-    def time_to_polish(self, contig):
+
+    def time_to_polish(self, contig: Sequence) -> bool:
+        """
+        Check if it's time to polish the contig.
+
+        :param contig: Contig sequence object.
+        :return: True if it's time to polish, False otherwise.
+        """
         # check if a component of the contig has already been polished
         components = contig.components
         c_threshold = contig.next_polish
@@ -955,7 +1097,13 @@ class SequencePool:
             return True
 
 
-    def get_atoms(self, headers):
+    def get_atoms(self, headers: List) -> Set[str]:
+        """
+        Get all atomic reads based on the given headers.
+
+        :param headers: List of headers.
+        :return: Set of atomic reads.
+        """
         # given a list of headers, get all atomic reads
         atoms = set()
         for h in headers:
@@ -964,9 +1112,13 @@ class SequencePool:
         return atoms
 
 
+    def get_components(self, headers: List) -> Set[str]:
+        """
+        Get all component reads based on the given list of headers.
 
-    def get_components(self, headers):
-        # given a list of headers, get all component reads
+        :param headers: List of headers.
+        :return: Set of component reads.
+        """
         components = set()
         for h in headers:
             cmp = self.sequences[h].components
@@ -976,63 +1128,28 @@ class SequencePool:
 
 
     @staticmethod
-    def write_seq_dict(seq_dict, file):
+    def write_seq_dict(seq_dict: Dict[str, str], file: str) -> None:
+        """
+        Write a sequence dictionary to file.
+
+        :param seq_dict: Sequence dictionary.
+        :param file: File to write the dictionary to.
+        """
         with open(file, 'w') as fasta:
             for sid, seq in seq_dict.items():
                 fasta.write(f'>{sid}\n')
                 fasta.write(f'{seq}\n')
 
 
-    # TODO depr
-    # @staticmethod
-    # def contigs2gfa(gfa, contigs, node_size):
-    #     # convert sequences to gfa with chunked up nodes
-    #     # verify file exists and is empty
-    #     empty_file(gfa)
-    #     # init node counter
-    #     node = 0
-    #     n = node_size
-    #     # check if there are any contigs
-    #     if not contigs:
-    #         return
-    #
-    #     # record the source and position of the nodes
-    #     node_sources = dict()
-    #     node_positions = dict()
-    #
-    #     # loop through contigs
-    #     for header, seqo in contigs.sequences.items():
-    #         # translate each sequence into gfa with fixed node size
-    #         # number of first seg in this longer segment
-    #         node_init = deepcopy(node)
-    #         # write a single sequence to gfa file
-    #         # chunk it up into nodes
-    #         seq = seqo.seq
-    #         cpos = 0
-    #         seq_chunks = [seq[i: i + n] for i in range(0, len(seq), n)]
-    #         # also chunk up the coverage of this segment
-    #         cov = seqo.cov.copy()
-    #         cov_chunks = [np.sum(cov[i: i + n]) for i in range(0, len(cov), n)]
-    #
-    #         with open(gfa, 'a') as gfa_file:
-    #             for c_idx in range(len(seq_chunks)):
-    #                 gfa_file.write(f'S\t{node}\t{seq_chunks[c_idx]}\tc:i:{cov_chunks[c_idx]}\n')
-    #                 node_sources[node] = header
-    #                 node_positions[node] = (cpos, cpos + n - 1)
-    #                 node += 1
-    #                 cpos += n
-    #
-    #             for i in range(node_init, node - 1):
-    #                 gfa_file.write(f'L\t{i}\t+\t{i + 1}\t+\t0M\n')
-    #                 gfa_file.write(f'L\t{i + 1}\t-\t{i}\t-\t0M\n')
-    #
-    #     return node_sources, node_positions
-
-
-
 
     @staticmethod
-    def parse_gfa(infile):
+    def parse_gfa(infile: str) -> Generator[Tuple[str, str, Dict[str, str]]]:
+        """
+        Parse a GFA file and yield header, sequence, and tags.
+
+        :param infile: Path to the GFA file.
+        :yields: A tuple containing the header, sequence, and tags.
+        """
         with open(infile, 'r') as gfa_file:
             for line in gfa_file:
                 if line.startswith('S'):
@@ -1044,8 +1161,13 @@ class SequencePool:
 
 
     @staticmethod
-    def _parse_tags(tag_string):
-        # parse the tags from a gaf segment
+    def _parse_tags(tag_string: str) -> Dict[str, str]:
+        """
+        Parse tags from a GFA segment and return a dictionary.
+
+        :param tag_string: String representation of the tags.
+        :return: A dictionary containing the parsed tags.
+        """
         tags = tag_string.strip().split('\t')
         tag_dict = dict()
         for t in tags:
@@ -1056,13 +1178,14 @@ class SequencePool:
 
 
     @staticmethod
-    def load_unitigs(gfa):
-        # load unitigs after graph cleaning with gfatools
-        # read either a gfa file or a string
-        # split the lines
-        # this makes sure that the unitigs are split
-        # and that we can filter the link lines
-        # first check if there are any unitigs
+    def load_unitigs(gfa: str) -> List['Unitig']:
+        """
+        Load unitigs after graph cleaning with gfatools.
+        Input can be a gfa file or the content of the file
+
+        :param gfa: Path to the GFA file or a string representation of the GFA.
+        :return: A list of Unitig objects.
+        """
         if not gfa:
             return []
 
@@ -1076,12 +1199,10 @@ class SequencePool:
         # first and last need extra treatment
         gfatt[0] = gfatt[0][2:]  # skip the first "S\t"
         gfatt[-1] = gfatt[-1].replace('\nx', '\nL').split('\nL')[0]  # exclude all L and x lines
-
         # get the x lines
         gfax = gfat.split('\nx\t')[1:]
         # make sure we have the same number of S_A lines and x lines
         assert len(gfatt) == len(gfax)
-
         # parse into unitig objects
         unitigs = []
         for sa_lines, x_line in zip(gfatt, gfax):
@@ -1090,36 +1211,40 @@ class SequencePool:
 
 
 
-    def is_intra(self, seq1, seq2):
-        # takes two sequence names and runs euclidean distance of tetramers
-        # this is to check whether the sequences would be classified as intraspecific
+    def is_intra(self, seq1: str, seq2: str) -> bool:
+        """
+        Check if two sequences are classified as intraspecific based on the Euclidean distance of tetramers.
+
+        :param seq1: Name of first sequence.
+        :param seq2: Name of second sequence.
+        :return: True if the sequences are classified as intraspecific, False otherwise.
+        """
         s1 = self.sequences[seq1]
         s2 = self.sequences[seq2]
         euc = euclidean_dist(s1, s2)
         return euc < euclidean_threshold
 
 
+
 class ContigPool(SequencePool):
 
-    """
-    a SequencePool specifically for contigs
-    - simply initialise as ContigPool(sequences=contigs)
-    - can do some additional things necessary for contigs
-    """
 
-    def process_contigs(self, node_size, lim, ccl, out_dir, batch, write=False):
-        # WRAPPER
+    def process_contigs(self, node_size: int, lim: int, ccl: NDArray, out_dir: str, batch: int, write: bool = False) -> Dict[str, NDArray]:
+        """
+        WRAPPER to process contigs by chunking them, processing ends and low coverage regions, and finding new strategies.
+
+        :param node_size: The node size.
+        :param lim: The low coverage threshold.
+        :param ccl: Read length distribution
+        :param out_dir: The output directory.
+        :param batch: The batch number.
+        :param write: Whether to write the new strategies. Defaults to False.
+        :return: A dictionary containing the new strategies for contigs.
+        """
         logging.info("finding new strategies.. ")
-        # chunk up contigs
-        logging.info("chunking contigs")
         self._chunk_up_contigs(node_size=node_size)
-        # process ends and low cov regions
-        logging.info("processing ends")
         self._process_contig_ends(node_size=node_size)
-        logging.info("processing low cov nodes")
         self._process_low_cov_nodes(node_size=node_size, lim=lim)
-        # find and write new strategies
-        logging.info("finding strategies")
         contig_strats = self._find_contig_strategies(node_size=node_size, ccl=ccl)
         if write:
             logging.info("writing new strategies")
@@ -1128,22 +1253,27 @@ class ContigPool(SequencePool):
         return contig_strats
 
 
-    def process_contigs_m0(self, score_vec, node_size, ccl, out_dir, mu, lam, batch, write=False):
-        # WRAPPER
-        logging.info("finding new strategies.. ")
-        # chunk up contigs
-        logging.info("chunking contigs")
+    def process_contigs_m0(self, score_vec: NDArray, node_size: int, ccl: NDArray, out_dir: str, mu: float, lam: float, batch: int, write: bool = False) -> Dict[str, NDArray]:
+        """
+        WRAPPER to process contigs using m0 strategy.
+
+        :param score_vec: The score vector.
+        :param node_size: The node size.
+        :param ccl: Read length distribution.
+        :param out_dir: The output directory.
+        :param mu: Length of anchor bases.
+        :param lam: The lam value.
+        :param batch: The batch number.
+        :param write: Whether to write the new strategies. Defaults to False.
+        :return: A dictionary containing the new strategies for contigs.
+        """
+        logging.info("finding new strategies.. m0")
         self._chunk_up_contigs(node_size=node_size)
-        # find scores
         self._contigs_scores(score_vec=score_vec, node_size=node_size)
-        # process ends and low cov regions
         self._process_contig_ends(node_size=node_size)
-        # find benefit
         self._contigs_benefits(ccl=ccl, mu=mu, node_size=node_size)
-        # find threshold
         t = self.find_threshold(mu=mu, lam=lam, node_size=node_size)
         # find and write new strategies
-        logging.info("finding strategies - m0")
         contig_strats = self._find_contig_strategies(node_size=node_size, ccl=ccl, t=t, m0=True)
         if write:
             logging.info("writing new strategies")
@@ -1152,47 +1282,66 @@ class ContigPool(SequencePool):
         return contig_strats
 
 
-    def _chunk_up_contigs(self, node_size):
-        # first thing to do for contigs
-        # for a collection of contigs, give them a chunked representation
+    def _chunk_up_contigs(self, node_size: int) -> None:
+        """
+        Chunk up collection of contigs by giving them a chunked representation to reduce resolution
+
+        :param node_size: The node size.
+        """
         n_comp = 0
         lengths = []
         for header, seqo in self.sequences.items():
             seqo.chunk_up_coverage(n=node_size)
             n_comp += 1
             lengths.append(len(seqo.seq))
-        # report some info
         lengths_sort = np.sort(lengths)[::-1]
         logging.info(f'num components: {n_comp}')
         logging.info(f'total comp length: {lengths_sort.sum()}')
         logging.info(f'longest components: {lengths_sort[:10]}')
 
 
-    def _contigs_scores(self, score_vec, node_size):
-        # get the scores for each contig
+    def _contigs_scores(self, score_vec: NDArray, node_size: int) -> None:
+        """
+        Get the scores for each contig.
+
+        :param score_vec: The score vector.
+        :param node_size: The node size.
+        """
         for header, seqo in self.sequences.items():
             seqo.contig_scores(score_vec=score_vec, n=node_size)
 
 
 
-    def _contigs_benefits(self, ccl, mu, node_size):
-        # get the benefit for each contig
+    def _contigs_benefits(self, ccl: NDArray, mu: float, node_size: int) -> None:
+        """
+        Get the benefit for each contig.
+
+        :param ccl: Read length distribution
+        :param mu: The length of anchor bases.
+        :param node_size: The node size.
+        """
         for header, seqo in self.sequences.items():
             seqo.contig_benefits(mu=mu, ccl=ccl, node_size=node_size)
 
 
-    def find_threshold(self, mu, lam, node_size):
+    def find_threshold(self, mu: float, lam: float, node_size: int) -> float:
+        """
+        Find the acceptance threshold based on all benefit values.
+
+        :param mu: Length of anchor bases
+        :param lam: The lam value.
+        :param node_size: The node size.
+        :return: Acceptance threshold.
+        """
         # flatten all benefit values
         benefit = np.column_stack([seqo.benefit for seqo in self.sequences.values()]).ravel()
         smu_sum = np.sum([seqo.smu_sum for seqo in self.sequences.values()])
-
         # find acceptance threshold
         alpha = 200 // node_size
         rho = 300 // node_size
         tc = (lam - mu - 300) // node_size
 
         benefit_bin, counts = benefit_bins(benefit)
-
         # average benefit of strategy in the case that all fragments are rejected
         ubar0 = smu_sum
         tbar0 = alpha + rho + (mu // node_size)
@@ -1205,26 +1354,31 @@ class ContigPool(SequencePool):
         # plt.plot(cs_t)
         # plt.plot(peak)
         # plt.show()
-
         # calculate threshold exponent and where values are geq
         try:
             threshold = benefit_bin[strat_size]
         except IndexError:
             threshold = benefit_bin[-1]
-
         return threshold
 
 
+    def _process_contig_ends(self, node_size: int) -> None:
+        """
+        Set contig ends to reflect their status during calculation of the strategy.
 
-
-    def _process_contig_ends(self, node_size):
-        # set contig ends so that they are picked up by the strategy
+        :param node_size: The node size.
+        """
         for header, seqo in self.sequences.items():
             seqo.set_contig_ends(n=node_size)
 
 
-    def _process_low_cov_nodes(self, node_size, lim):
-        # find low coverage nodes that we want to target
+    def _process_low_cov_nodes(self, node_size: int, lim: int) -> None:
+        """
+        Find low coverage nodes to target in contigs.
+
+        :param node_size: The node size.
+        :param lim: The low coverage threshold.
+        """
         unfilt = 0
         filt = 0
         for header, seqo in self.sequences.items():
@@ -1234,8 +1388,16 @@ class ContigPool(SequencePool):
         logging.info(f'low coverage nodes: {unfilt}, after filtering: {filt}')
 
 
-    def _find_contig_strategies(self, node_size, ccl, t=0, m0=False):
-        # find the boolean strategy for each contig
+    def _find_contig_strategies(self, node_size: int, ccl: NDArray, t: float = 0.0, m0: bool = False) -> Dict[str, NDArray]:
+        """
+        Find the strategies for all contigs.
+
+        :param node_size: The node size.
+        :param ccl: Read length distribution
+        :param t: The score threshold. Defaults to 0.0.
+        :param m0: Whether to use the m0 strategy
+        :return: A dictionary containing the new strategies for contigs.
+        """
         contig_strats = {}
         for header, seqo in self.sequences.items():
             if not m0:
@@ -1246,10 +1408,16 @@ class ContigPool(SequencePool):
         return contig_strats
 
 
-    def _write_contig_strategies(self, out_dir, contig_strats):
-        # write the strategies for all contigs to a single file
+    def _write_contig_strategies(self, out_dir: str, contig_strats: Dict[str, NDArray]) -> None:
+        """
+        Write the strategies for all contigs to a single file.
+
+        :param out_dir: The output directory.
+        :param contig_strats: A dictionary containing the strategies for contigs.
+        """
         cpath = f'{out_dir}/masks/aeons'
         np.savez(cpath, **contig_strats)
+        # Example how to load these:
         # container = np.load(f'{cpath}.npz')
         # data = {key: container[key] for key in container}
         # place a marker that the strategies were updated
@@ -1258,9 +1426,13 @@ class ContigPool(SequencePool):
 
 
 
-    def _write_index_file(self, out_dir, batch):
-        # write new index file to map against
-        # and place marker file to tell readfish to reload
+    def _write_index_file(self, out_dir: str, batch: int) -> None:
+        """
+        Write a new index file to map against and place a marker file to trigger reloading strategies
+
+        :param out_dir: The output directory.
+        :param batch: The batch number.
+        """
         fa_path = f'{out_dir}/contigs/aeons.fa'
         mmi_path = f'{out_dir}/contigs/aeons.mmi'
         # save the contigs to fasta
@@ -1280,17 +1452,25 @@ class ContigPool(SequencePool):
 
 class Unitig:
 
-    def __init__(self, sa_line_list, x_line):
-        # takes a list of lines from a gfa
-        # i.e. the S & A lines corresponding to a single unitig
+    def __init__(self, sa_line_list: List[str], x_line: str):
+        """
+        Initialize Unitig object.
+
+        :param sa_line_list: A list of lines from a GFA file corresponding to the S & A lines of a single unitig.
+        :param x_line: The X line from the GFA file corresponding to the unitig.
+        """
         self.name = random_id()
         self._format_sa(sa_line_list)
         self._format_x(x_line)
-        # dummy init
         self.cov = None
 
 
-    def _format_x(self, x_line):
+    def _format_x(self, x_line: str) -> None:
+        """
+        Format the X line of the unitig.
+
+        :param x_line: The X line from the GFA file.
+        """
         xl = x_line.split("\t")
         assert xl[0].startswith('utg')
         try:
@@ -1300,29 +1480,42 @@ class Unitig:
             self.cap_l = False
             self.cap_r = False
             return
-
         self.cap_l = True if cl > 0 else False
         self.cap_r = True if cr > 0 else False
 
 
 
-    def _format_sa(self, line_list):
+    def _format_sa(self, line_list: List[str]) -> None:
+        """
+        Format the S & A lines of the unitig.
+
+        :param line_list: A list of lines from the GFA file corresponding to the S & A lines of the unitig.
+        """
         self._format_sline(sline=line_list[0])
         self._format_atoms(alines=line_list[1:])
 
 
-    def _format_sline(self, sline):
+    def _format_sline(self, sline: str) -> None:
+        """
+        Format the S line of the unitig.
+
+        :param sline: The S line from the GFA file.
+        """
         sls = sline.split('\t')
         self.seq = sls[1]
         self.length = int(sls[2].split(':')[-1])
         circ = sls[0][-1]
         self.circ = True if circ == 'c' else False
-        # self.n_atoms = int(sls[3].split(':')[-1])
         assert sls[0].startswith('utg')
         assert self.length == len(self.seq)
 
 
-    def _format_atoms(self, alines):
+    def _format_atoms(self, alines: List[str]) -> None:
+        """
+        Format the A lines (atoms) of the unitig.
+
+        :param alines: A list of lines
+        """
         atoms = []
         for line in alines:
             assert line.startswith('A')
@@ -1353,15 +1546,18 @@ class Unitig:
             cpos = pos
         # mark last atom
         atoms[-1]['n'] = -1
-
         self.atoms = atoms
         self.atom_headers = [a['name'] for a in atoms]
 
 
-    def to_seqo(self, seqpool):
-        # transform the unitig to sequence object
-        # this can only be done after merging coverage array
-        # check if that has been done
+    def to_seqo(self, seqpool: SequencePool) -> Sequence:
+        """
+        Transform unitig into a sequence object. Needs to be done after merging coverage.
+
+        :param seqpool: The sequence pool of the source sequence that made the unitig.
+        :return: A sequence object representing the unitig.
+        """
+        # check that coverage merging has been done
         assert self.cov is not None
         # grab atoms of atoms
         merged_atoms = seqpool.get_atoms(headers=self.atom_headers)
@@ -1375,21 +1571,35 @@ class Unitig:
 
 class UnitigPool:
 
-    def __init__(self, unitigs):
+    def __init__(self, unitigs: List[Unitig]):
+        """
+        Initialize a UnitigPool object.
+
+        :param unitigs: A list of Unitig objects.
+        """
         self.unitigs = unitigs
 
 
-    def get_unitig_coverage_arrays(self, seqpool):
-        # for each of the unitigs, perform the cov array merging
+    def get_unitig_coverage_arrays(self, seqpool: SequencePool) -> None:
+        """
+        Perform coverage array merging for each unitig in the pool.
+
+        :param seqpool: The sequence pool object.
+        """
         for u in self.unitigs:
-            cm = CoverageMerger(u, seqpool)
+            cm = CoverageMerger(u, seqpool.sequences)
             cov_arr = cm.cov_arr
             u.cov = cov_arr
 
 
-    def unitigs2seqpool(self, seqpool, min_seq_len):
-        # transform all unitigs to seq objects
-        # and get the read ids to remove
+    def unitigs2seqpool(self, seqpool: SequencePool, min_seq_len: int) -> Tuple[SequencePool, Set[str]]:
+        """
+        Transform all unitigs in the pool to sequence objects and obtain the read IDs to remove.
+
+        :param seqpool: The sequence pool object.
+        :param min_seq_len: The minimum sequence length for the new pool.
+        :return: A tuple containing the new sequence pool and the set of used read IDs.
+        """
         seqos = {}
         used_sids = set()
         for u in self.unitigs:
@@ -1404,24 +1614,39 @@ class UnitigPool:
 
 class CoverageMerger:
 
-    def __init__(self, unitig, seqpool):
-        # create the merged coverage array for an unitig
+
+    def __init__(self, unitig: Unitig, seqpool: Dict[str, Sequence]) -> None:
+        """
+        Initializes a CoverageMerger object.
+
+        :param unitig: Unitig object.
+        :param seqpool: Dictionary of sequences used to create the unitigs
+        :raises AssertionError: If the length of the unitig is not equal to the shape of the merged coverage array.
+
+        """
         self.unitig = unitig
         cov_arr = self._create_merged_arr(atoms=unitig.atoms, seqpool=seqpool)
         assert unitig.length == cov_arr.shape[0]
         self.cov_arr = cov_arr
 
-    def _create_merged_arr(self, atoms, seqpool):
+
+    def _create_merged_arr(self, atoms: List[Dict[str, Any]], seqpool: Dict[str, Sequence]) -> NDArray:
+        """
+        Creates merged coverage array for the unitig.
+
+        :param atoms: List of atom dictionaries.
+        :param seqpool: Dictionary of sequences used to create the unitigs
+        :return: The merged coverage array.
+        """
         arr_parts = []
         cpos = 0
         for a in atoms:
             assert a['pos'] >= cpos
             name = a['name']
             atom_arr = seqpool[name].cov.copy()
-            # TODO not sure if reverse first or trim first
             atom_arr = atom_arr[::-1] if a['rev'] else atom_arr
             if not a['n'] == -1:
-                atom_arr = atom_arr[: a['n']]  # TODO maybe + 1?
+                atom_arr = atom_arr[: a['n']]
             else:
                 # add last atom (goes until end of atom)
                 if not self.unitig.circ:
@@ -1439,8 +1664,12 @@ class CoverageMerger:
 class MultilineContainments:
 
 
-    def __init__(self, records):
-        # records is a list of PafLine objects
+    def __init__(self, records: List[PafLine]) -> None:
+        """
+        Initializes a MultilineContainments object.
+
+        :param records: A list of PafLine objects.
+        """
         self.records = records
         # collect all partners with multiple mappings
         multidict = self._fill_multidict()
@@ -1449,7 +1678,12 @@ class MultilineContainments:
         self.containments = containments
 
 
-    def _fill_multidict(self):
+    def _fill_multidict(self) -> Dict[str, List[PafLine]]:
+        """
+        Fills a multidict with records that have multiple mappings.
+
+        :return: The multidict of (key, records) pairs.
+        """
         multidict = defaultdict(list)
         for rec in self.records:
             multidict[rec.keygen()].append(rec)
@@ -1457,10 +1691,14 @@ class MultilineContainments:
         return multidict
 
 
-    def _get_multiline_containments(self, multidict):
-        # check for containment from multiple internal match mappings
-        containments = {}
+    def _get_multiline_containments(self, multidict: Dict[str, List[PafLine]]) -> Dict[Edge, PafLine]:
+        """
+        Gets the multiline containments from the multidict using multiple internal mappings.
 
+        :param multidict: The multidict of (key, records) pairs.
+        :return: Dictionary of (contained, container) tuples mapped to PafLine objects.
+        """
+        containments = {}
         for k, recs in multidict.items():
             cont = self.multiline_containment(recs)
             if cont:
@@ -1469,14 +1707,21 @@ class MultilineContainments:
 
 
     @staticmethod
-    def multiline_containment(records, n=100):
+    def multiline_containment(records: List[PafLine], n: int = 100) -> Dict[Edge, PafLine]:
+        """
+        Checks for multiline containment from multiple internal match mappings.
+
+        :param records: A list of PafLine objects.
+        :param n: Node size, defaults to 100.
+        :return: The dictionary of (contained, container) tuples mapped to PafLine objects, or empty dict
+        """
         qlen = records[0].qlen // n
         tlen = records[0].tlen // n
         qarr = np.zeros(shape=qlen , dtype="bool")
         tarr = np.zeros(shape=tlen , dtype="bool")
 
         if len(records) > 10:
-            return False
+            return {}
 
         for r in records:
             qarr[r.qstart // n: r.qend // n] = 1
@@ -1506,14 +1751,34 @@ class MultilineContainments:
                 return cont
 
         # if neither q nor t are contained
-        return False
+        return {}
 
 
     @staticmethod
-    def generate_paf_cont(records, ctd, ctr, ctd_low, ctd_high, ctr_low, ctr_high, n):
-        # given a list of records that make up a multic
-        # generate some paf that describes the containment
-        # so that we can use it for incrementing
+    def generate_paf_cont(
+        records: List[PafLine],
+        ctd: str,
+        ctr: str,
+        ctd_low: int,
+        ctd_high: int,
+        ctr_low: int,
+        ctr_high: int,
+        n: int
+    ) -> Dict[Edge, PafLine]:
+        """
+        Generates a PafLine object that describes the containment,
+         given a list of records that make up one multicontainment
+
+        :param records: A list of PafLine objects.
+        :param ctd: The contained sequence name.
+        :param ctr: The container sequence name.
+        :param ctd_low: The lower bound of the contained sequence.
+        :param ctd_high: The upper bound of the contained sequence.
+        :param ctr_low: The lower bound of the container sequence.
+        :param ctr_high: The upper bound of the container sequence.
+        :param n: Node size.
+        :return: The dictionary of (contained, container) tuples mapped to PafLine objects.
+        """
         ctd_name = getattr(records[0], f'{ctd}name')
         ctr_name = getattr(records[0], f'{ctr}name')
         ctd_len = getattr(records[0], f'{ctd}len')
@@ -1542,7 +1807,16 @@ class MultilineContainments:
 
 
 
-def roll_boolean_array(arr, steps, direction):
+def roll_boolean_array(arr: NDArray, steps: int, direction: int) -> NDArray:
+    """
+    Rolls a boolean array in a specified direction, i.e. spread truthy values.
+
+    :param arr: The boolean array to be rolled.
+    :param steps: The number of steps to roll the array.
+    :param direction: The direction in which to roll the array (0 for left, 1 for right).
+    :return: The rolled boolean array.
+    :raises ValueError: If the direction is not 0 or 1.
+    """
     assert arr.dtype == "bool"
     # rolling direction is opposite of input
     if direction == 0:
@@ -1558,28 +1832,18 @@ def roll_boolean_array(arr, steps, direction):
 
 
 
-
-def find_dropout_threshold(coverage, mod=800):
+def find_dropout_threshold(coverage: NDArray, mod: int = 800) -> int:
     '''
     If there are sites that have not had much coverage after some time
     we don't expect them to gain much after that and want to ignore them
 
-    Parameters
-    ----------
-    coverage: np.array
-        coverage depth at each position
-    mod: int
-        threshold modifier
-
-    Returns
-    -------
-    dropout: np.array
-        array of positions that will most likely not get much more coverage
-
+    :param coverage: coverage depth at each position
+    :param mod: threshold modifier
+    :return threshold: threshold at which to consider as dropout
     '''
     cov_mean = np.mean(coverage)
     # ignore threshold is dependent on mean coverage
     threshold = int(cov_mean / mod)
-    # dropout = np.where(coverage <= threshold)[0]
     return threshold
+
 
