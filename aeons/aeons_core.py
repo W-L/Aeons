@@ -79,6 +79,7 @@ class AeonsRun:
             os.mkdir(f'{args.out_dir}/logs')
             os.mkdir(f'{args.out_dir}/contigs')
             os.mkdir(f'{args.out_dir}/contigs/prev')
+            os.mkdir(f'{args.out_dir}/contigs/init')
 
         # initialise a log file in the output folder
         init_logger(logfile=f'{args.out_dir}/{args.name}.aeons.log', args=args)
@@ -145,33 +146,51 @@ class AeonsRun:
 
 
             # load some initial batches
-            if self.args.binit:
-                self.load_init_batches(binit=self.args.binit)
-            # if binit is set to 0, we calculate how many batches it takes to cover the genome x times
-            else:
-                binit = self.wait_for_batches(bsize=self.args.bsize, cov=self.args.cov_wait, gsize=self.args.gsize)
-                logging.info(f"loading {binit} batches...")
-                self.load_init_batches(binit=binit)
+            # if self.args.binit:
+            init_pool = SequencePool(name="init_pool", out_dir=args.out_dir)
+            for i in range(self.args.binit):
+                self.stream.read_batch()
+                init_pool.ingest(seqs=self.stream.read_sequences)
+                # save the source file name for the reads
+                # for header in self.stream.read_sequences.keys():
+                #     self.read_sources[header] = self.stream.source  # TODO live version
+            logging.info(f"total bases in pool: {init_pool.total_bases()}")
+
+
             # increment time after preloading
-            self.update_times(read_sequences=self.pool.seqdict(),
-                              reads_decision=self.pool.seqdict(),
-                              reads_decision_readfish=self.pool.seqdict())
+            self.update_times(read_sequences=init_pool.seqdict(),
+                              reads_decision=init_pool.seqdict(),
+                              reads_decision_readfish=init_pool.seqdict())
 
 
             # set the batch counter for the run
             self.batch = self.stream.batch
 
+
+            init_contigs = init_pool.initial_asm_miniasm()
+            self.pool.ingest(init_contigs)
+            ncontigs = len(self.pool.sequences)
+            logging.info(f'initial contigs: {ncontigs}')
+
+            if len(self.pool.sequences) == 0:
+                print("no contigs, need more data")
+                sys.exit()
+
+            self.pool.write_seq_dict(seq_dict=self.pool.seqdict(), file=self.pool.contig_fa)
+
+            # TODO fallback homebrew
             # fill the initial AVA
-            self.prep_first_ava()
+            # self.prep_first_ava()
 
             # initialise a RepeatFilter from first AVA
-            if self.args.filter_repeats:
-                self.repeat_filter = RepeatFilter2(name=args.name, seqpool=self.pool)
+            # if self.args.filter_repeats:
+            #     self.repeat_filter = RepeatFilter2(name=args.name, seqpool=self.pool)
 
             # create first asm
-            self.assemble_add_and_filter_contigs()
+            # self.assemble_add_and_filter_contigs()
 
             # cov_counts, cov_means = self.pool.count_coverage()
+            return
 
 
         else:
@@ -204,6 +223,7 @@ class AeonsRun:
             self.processed_files.update(new_fastq)
             self.n_fastq = len(new_fastq)
             logging.info("Initial asm completed\n\n")
+            return
 
 
 
@@ -234,8 +254,6 @@ class AeonsRun:
 
 
 
-
-
     def wait_for_batches(self, bsize, gsize=12e6, cov=2):
         # how many batches of reads do we need to wait for until the estimated genome size is
         # covered ~cov times?
@@ -246,14 +264,6 @@ class AeonsRun:
         return int(np.ceil(x))
 
 
-    def load_init_batches(self, binit):
-        # this is to load several batches from which to make an initial assembly
-        for i in range(binit):
-            self.stream.read_batch()
-            self.pool.ingest(seqs=self.stream.read_sequences)
-            # save the source file name for the reads
-            for header in self.stream.read_sequences.keys():
-                self.read_sources[header] = self.stream.source  # TODO live version
 
 
     def load_init_contigs(self, preload):
@@ -264,7 +274,7 @@ class AeonsRun:
             for header, seq in read_fa(contigs):
                 header = str(header)
                 header = header.replace('>', '')
-                # header = header.replace('_', '-')  # TODO why did we do this?
+                # header = header.replace('_', '-')
                 prebuilt[header] = seq
 
         # save the source file name for the contigs (for polishing)
