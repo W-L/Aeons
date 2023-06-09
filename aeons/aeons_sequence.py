@@ -442,6 +442,7 @@ class SequencePool:
         self.out_dir = out_dir
         self.sequences = dict()
         self.threads = threads
+        self.name = name
 
         if sequences:
             # the given sequences can be raw or Sequence objects
@@ -476,6 +477,11 @@ class SequencePool:
     def seqdict(self):
         # convenience raw sequence dict
         return {header: seqo.seq for header, seqo in self.sequences.items()}
+
+
+    def total_bases(self):
+        # sum the total bases in the pool
+        return np.sum([len(seqo.seq) for header, seqo in self.sequences.items()])
 
 
     def count_coverage(self):
