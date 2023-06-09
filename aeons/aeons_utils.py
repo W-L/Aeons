@@ -356,6 +356,24 @@ def separate_by_species(paf):
 
 
 
+def load_gfa(gfa_path):
+    # generator reading gfa
+    def _load_gfa(infile):
+        with open(infile, 'r') as gfa_file:
+            for line in gfa_file:
+                if line.startswith('S'):
+                    ll = line.split('\t')
+                    header = ll[1]
+                    seq = ll[2]
+                    yield header, seq
+
+    sequences = {}
+    for header, seq in _load_gfa(gfa_path):
+        sequences[header] = seq
+    return sequences
+
+
+
 # for launching the snakemake after the run automatically
 def get_dump_number(run_name):
     logfile = f'out_{run_name}/{run_name}.aeons.log'
