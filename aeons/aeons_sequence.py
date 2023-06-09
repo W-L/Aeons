@@ -508,7 +508,7 @@ class Sequence:
         """
         # cover X% of ccl
         n_steps = int(ccl[-3] / n)
-        # spread the nodes of interest in both directions to get final binary arr
+        # spread the nodes of interest in both directions to get binary arr
         fwd = roll_boolean_array(arr=self.noi.copy(), steps=n_steps, direction=0)
         rev = roll_boolean_array(arr=self.noi.copy(), steps=n_steps, direction=1)
         self.strat = np.column_stack((fwd, rev))
@@ -519,7 +519,9 @@ class Sequence:
         """
         Find the strategy for the contig using benefit threshold.
 
-    def find_strat_m0(self, threshold):
+        :param threshold: threshold value.
+        :return: Strategy array.
+        """
         strat = np.where(self.benefit >= threshold, True, False)
         return strat.transpose()
 
