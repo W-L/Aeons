@@ -246,7 +246,28 @@ class SequenceAVA:
 
 class Sequence:
 
-    def __init__(self, header, seq, cov=None, merged_components=None, merged_atoms=None, cap_l=False, cap_r=False):
+    def __init__(
+        self,
+        header: str,
+        seq: str,
+        cov: Optional[NDArray] = None,
+        merged_components: Optional[List[str]] = None,
+        merged_atoms: Optional[List[str]] = None,
+        cap_l: bool = False,
+        cap_r: bool = False,
+    ):
+        """
+        Initialize a Sequence object.
+
+        :param header: The header of the sequence.
+        :param seq: The sequence data.
+        :param cov: The coverage array (optional).
+        :param merged_components: The list of merged components (optional).
+        :param merged_atoms: The list of merged atoms (optional).
+        :param cap_l: Flag indicating if the sequence has a left cap (default: False).
+        :param cap_r: Flag indicating if the sequence has a right cap (default: False).
+        """
+
         self.header = header
         self.seq = seq
 
@@ -275,17 +296,30 @@ class Sequence:
         self.temperature = 30
         self.cap_l = cap_l
         self.cap_r = cap_r
+        # accept overlaps
+        self.acceptor = True
 
 
+    def is_hot(self) -> bool:
+        """
+        Is the sequence active?
 
-    def check_temperature(self):
-        if self.temperature <= 0:
-            return 0
-        return 1
+        :return: True if temperature is >0, False otherwise.
+        """
+        if self.temperature > 0:
+            return True
+        else:
+            return False
 
 
-    def polish_sequence(self, read_sources):
-        success = 0
+    def polish_sequence(self, read_sources) -> bool:
+        """
+        Polish the sequence using a polisher object.
+
+        :param read_sources: The read sources.
+        :return: True if successful, False otherwise.
+        """
+        success = False
         # don't polish raw reads, only derived sequences
         if '*' not in self.header:
             return success
@@ -307,14 +341,20 @@ class Sequence:
         return success
 
 
-    def replace_polished_products(self, polished_seq):
+    def replace_polished_products(self, polished_seq: str) -> bool:
+        """
+        Replace the sequence with a polished sequence.
+
+        :param polished_seq: The polished sequence.
+        :return: True if successful, False otherwise.
+        """
         # Check the difference in length between old and new
         orig_len = len(self.seq)
         new_len = len(polished_seq)
         len_diff = abs(orig_len - new_len)
         # don't use new seq if the length changed by a lot
         if len_diff > orig_len * 0.1:
-            return 0
+            return False
         # replace the sequence with polished one
         self.seq = polished_seq
         # adjust the coverage array to new length
@@ -338,26 +378,42 @@ class Sequence:
         # change the polishing threshold
         self.last_polish = self.next_polish
         self.next_polish += self.polish_step
-        return 1
+        return True
 
 
-    def chunk_up_coverage(self, n):
-        # for generating strategies, we need to chunk the coverage
-        cov = self.cov
-        self.cov_chunked = np.array([np.sum(cov[i: i + n]) for i in range(0, len(cov), n)])
+    def chunk_up_coverage(self, n: int):
+        """
+        Chunk up the coverage array to reduce resolution of strategies.
+
+        :param n: The chunk size.
+        """
+        self.cov_chunked = np.array([np.sum(self.cov[i: i + n]) for i in range(0, len(self.cov), n)])
         # init an empty array to record nodes of interest
         self.noi = np.zeros(shape=self.cov_chunked.shape[0], dtype="bool")
         self.scores = np.zeros(shape=self.cov_chunked.shape[0], dtype="float")
         self.benefit = np.zeros(shape=self.cov_chunked.shape[0], dtype="float")
 
 
-    def contig_scores(self, score_vec, n):
+    def contig_scores(self, score_vec: NDArray, n: int):
+        """
+        Calculate scores for the contig.
+
+        :param score_vec: The precomputed scoring vector.
+        :param n: The node size.
+        """
         sc = score_array(score_vec=score_vec, cov_arr=self.cov_chunked, node_size=n)
         self.scores = sc
         assert self.cov_chunked.shape[0] == self.scores.shape[0]
 
 
-    def contig_benefits(self, mu, ccl, node_size):
+    def contig_benefits(self, mu: int, ccl: NDArray, node_size: int):
+        """
+        Calculate benefits for the contig.
+
+        :param mu: The mu value.
+        :param ccl: The ccl value.
+        :param node_size: The node size.
+        """
         benefit, smu_sum = calc_fragment_benefit(
             scores=self.scores,
             mu=mu,
@@ -372,7 +428,13 @@ class Sequence:
 
 
 
-    def set_contig_ends(self, n, lim=50):
+    def set_contig_ends(self, n: int, lim: int = 50):
+        """
+        Declare ends of contig.
+
+        :param n: The node size.
+        :param lim: The coverage limit (default: 50).
+        """
         cc = self.cov_chunked
         if cc[0] > lim * n:
             pass
@@ -393,7 +455,14 @@ class Sequence:
             self.scores[-1] = 1
 
 
-    def find_low_cov(self, n, lim):
+    def find_low_cov(self, n: int, lim: int) -> Tuple[int, int]:
+        """
+        Find low coverage regions in the contig.
+
+        :param n: The node size.
+        :param lim: The coverage limit.
+        :return: The number of original low coverage windows and the number of filtered windows.
+        """
         # find where the coverage is too low
         cc = self.cov_chunked
         dropout_lim = find_dropout_threshold(cc)
@@ -414,7 +483,14 @@ class Sequence:
         return n_unfilt, n_filt
 
 
-    def find_strat(self, ccl, n):
+    def find_strat(self, ccl: NDArray, n: int) -> NDArray:
+        """
+        Find the strategy for the contig.
+
+        :param ccl: The ccl distribution array.
+        :param n: The node size.
+        :return: Strategy array.
+        """
         # cover X% of ccl
         n_steps = int(ccl[-3] / n)
         # spread the nodes of interest in both directions to get final binary arr
@@ -424,6 +500,9 @@ class Sequence:
         return self.strat
 
 
+    def find_strat_m0(self, threshold: float) -> NDArray:
+        """
+        Find the strategy for the contig using benefit threshold.
 
     def find_strat_m0(self, threshold):
         strat = np.where(self.benefit >= threshold, True, False)
