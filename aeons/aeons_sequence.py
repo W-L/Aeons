@@ -9,7 +9,7 @@ from shutil import copy
 import numpy as np
 
 from .aeons_paf import PafLine, Paf
-from .aeons_utils import execute, find_exe, write_logs, empty_file, random_id, find_blocks_generic
+from .aeons_utils import execute, find_exe, write_logs, random_id, find_blocks_generic, load_gfa
 from .aeons_polisher import Polisher
 from .aeons_kmer import euclidean_dist, euclidean_threshold
 from .aeons_mapper import Indexer
@@ -563,6 +563,29 @@ class SequencePool:
         if os.path.exists(f'{self.out_dir}/logs'):
             write_logs(stdout, stderr, f'{self.out_dir}/logs/ava')
         return paf
+
+
+
+    def initial_asm_miniasm(self, c=3, trds=8):
+        # write sequences to file
+        sfile = f'{self.name}.init_reads.fa'
+        self.write_seq_dict(self.seqdict(), file=sfile)
+
+        comm0 = f'{self.dep.mm2} -x ava-ont -t{trds} {sfile} {sfile} >{sfile}.ava'
+        stdout, stderr = execute(comm0)
+        write_logs(stdout, stderr, f'{self.out_dir}/contigs/init/init_ava')
+        comm1 = f"miniasm -f {sfile} {sfile}.ava -c{c} >{self.name}.init.gfa"  # TODO make dep
+        stdout, stderr = execute(comm1)
+        write_logs(stdout, stderr, f'{self.out_dir}/contigs/init/init_asm')
+
+        contigs = load_gfa(f'{self.name}.init.gfa')
+        contig_pool = SequencePool(contigs)
+        # disallow extension of circular contigs
+        for header, seqo in contig_pool.sequences.items():
+            if header[-1] == 'c':
+                seqo.acceptor = False
+
+        return contig_pool
 
 
 
