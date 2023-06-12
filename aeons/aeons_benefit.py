@@ -1,14 +1,23 @@
-# from scipy.stats import gamma
+from concurrent.futures import ThreadPoolExecutor as TPexe
+from typing import Tuple
+
 import numpy as np
+from numpy.typing import NDArray
 import bottleneck as bn
 
-from concurrent.futures import ThreadPoolExecutor as TPexe
+
+"""
+Module with functions for scoring coverage arrays and calculating benefit of sequences
+"""
 
 
-# functions for scoring coverage arrays
+def init_scoring_vec(lowcov: float) -> NDArray:
+    """
+    Initialize scoring vector based on target coverage.
 
-def init_scoring_vec(lowcov):
-    # create scoring function depending on target coverage
+    :param lowcov: The target coverage value.
+    :return: The scoring vector.
+    """
     x = np.arange(101)
     # a = lowcov * 5
     # score_vec = -gamma.cdf(x, a=a, scale=0.2) + 1
@@ -16,17 +25,37 @@ def init_scoring_vec(lowcov):
     return score_vec
 
 
-def score_array(score_vec, cov_arr, node_size):
+
+def score_array(score_vec: NDArray, cov_arr: NDArray, node_size: int) -> NDArray:
+    """
+    Calculate scores based on the scoring vector and coverage array.
+
+    :param score_vec: scoring vector.
+    :param cov_arr: coverage array.
+    :param node_size: node size.
+    :return: The calculated scores.
+    """
     # grab scores using multi-indexing
-    carr = cov_arr // node_size  # get down to normal cov levels
+    carr = cov_arr // node_size  # apply resolution reduction
     carr_int = carr.astype("int")
     scores = score_vec[carr_int]
     return scores
 
 
-# functions for claculating benefit of a fragment
 
-def calc_fragment_benefit(scores, mu, node_size, approx_ccl, e1, e2):
+
+def calc_fragment_benefit(scores: NDArray, mu: int, node_size: int, approx_ccl: NDArray, e1: bool, e2: bool) -> Tuple[NDArray, float]:
+    """
+    Calculate the benefit of a fragment based on scores, mu, node_size, approx_ccl, e1, and e2.
+
+    :param scores: Fragment's position-wise scores.
+    :param mu: Length of anchor bases.
+    :param node_size: node size.
+    :param approx_ccl: Approx of read length distribution.
+    :param e1: Left-end marker.
+    :param e2: Right-end marker.
+    :return: The calculated benefit and smu_sum.
+    """
     # expand score to account for contig ends
     mu_ds = mu // node_size
     ccl_ds = approx_ccl // node_size
@@ -34,7 +63,7 @@ def calc_fragment_benefit(scores, mu, node_size, approx_ccl, e1, e2):
     sx = _expand_scores(scores, e1, e2, ccl_max)
     smu = _calc_smu_moving(score=sx, mu_ds=mu_ds)
     benefit = _calc_benefit_moving(score=sx, ccl_ds=ccl_ds)
-    smu_sum = np.sum(smu)
+    smu_sum = float(np.sum(smu))
     b = benefit - smu
     b[b < 0] = 0
     b = b[:, ccl_max: -ccl_max]
@@ -43,7 +72,16 @@ def calc_fragment_benefit(scores, mu, node_size, approx_ccl, e1, e2):
 
 
 
-def _expand_scores(scores, e1, e2, ccl_max):
+def _expand_scores(scores: NDArray, e1: bool, e2: bool, ccl_max: int) -> NDArray:
+    """
+    Expand scores to account for contig ends.
+
+    :param scores: Fragment scores.
+   :param e1: Left-end marker.
+    :param e2: Right-end marker.
+    :param ccl_max: Max of approx read length dist.
+    :return: The expanded scores.
+    """
     scoresx = np.zeros(shape=scores.shape[0] + (ccl_max * 2), dtype="float64")
     scoresx[ccl_max: -ccl_max] = scores
     scoresx[0: ccl_max] = 1 if e1 else 0
@@ -52,7 +90,14 @@ def _expand_scores(scores, e1, e2, ccl_max):
 
 
 
-def _calc_smu_moving(score, mu_ds):
+def _calc_smu_moving(score: NDArray, mu_ds: int) -> NDArray:
+    """
+    Calculate smu moving based on score and down-sampled mu.
+
+    :param score: The score.
+    :param mu_ds: The mu_ds.
+    :return: The calculated smu.
+    """
     smu_fwd = bn.move_sum(score, window=mu_ds, min_count=1)
     smu_rev = bn.move_sum(score[::-1], window=mu_ds, min_count=1)
     smu = np.stack((smu_fwd, smu_rev))
@@ -60,7 +105,14 @@ def _calc_smu_moving(score, mu_ds):
 
 
 
-def _calc_benefit_moving(score, ccl_ds):
+def _calc_benefit_moving(score: NDArray, ccl_ds: NDArray) -> NDArray:
+    """
+    Calculate benefit moving based on score and ccl_ds.
+
+    :param score: Fragment scores.
+    :param ccl_ds: Down-sampled read length dist array.
+    :return: The calculated benefit.
+    """
     score_rev = score[::-1]
     benefit = np.zeros(shape=(2, score.shape[0]), dtype="float64")
     perc = np.arange(0.1, 1.1, 0.1)[::-1]
@@ -74,11 +126,14 @@ def _calc_benefit_moving(score, ccl_ds):
 
 
 
-# function used during threshold calculation
 
-def benefit_bins(benefit):
-    # group benefit into bins of similar values
-    # using binary exponent
+def benefit_bins(benefit: NDArray) -> Tuple[NDArray, NDArray]:
+    """
+    Group benefit into bins of similar values using binary exponent. Used to find acceptance threshold
+
+    :param benefit: positional benefit array.
+    :return: The benefit bins and counts.
+    """
     benefit_nz_ind = np.nonzero(benefit)
     benefit_flat_nz = benefit[benefit_nz_ind]
     # to make binary exponents work, normalise benefit values
@@ -94,7 +149,7 @@ def benefit_bins(benefit):
         exponent_counts = executor.map(np.bincount, exponent_arrays)
     exponent_counts = list(exponent_counts)
     # aggregate results from threads
-    # target array needs to have largest shape of the thread results
+    # target array needs to have the largest shape of the thread results
     max_exp = np.max([e.shape[0] for e in exponent_counts])
     bincounts = np.zeros(shape=max_exp, dtype='int')
     # sum up results from individual threads
