@@ -1,17 +1,16 @@
 """
-Constants used throughout aeons importable in other modules
+Constants used throughout Aeons
 """
 
 
 class Constants:
     def __init__(self):
-        self.workers = 4                # so far used in fastqstream read retrieval
-        self.mu = 400                   # initial bit of the read for decision making
+        self.workers = 4                # used in fastqstream read retrieval during simulations
+        self.mu = 400                   # length of anchor bases
         self.node_size = 100            # length of a single node in the graph in bases, determines strategy compression, hard-coded in readfish
         self.rho = 300
         self.alpha = 200
-        self.wait = 60                  # waiting time in live version
-        # self.cov_wait = 2
+        self.wait = 60                  # waiting time between updates in live version
         # self.redotable = "/hps/software/users/goldman/lukasw/redotable/redotable_v1.1/redotable"
         # self.redotable = "/home/lukas/software/redotable/redotable_v1.1/redotable"
 
