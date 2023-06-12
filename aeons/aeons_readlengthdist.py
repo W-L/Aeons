@@ -1,19 +1,21 @@
 import logging
 
-# non-std lib
 import numpy as np
-
-"""
-read length dist used in aeons
-"""
-
-
+from numpy.typing import NDArray
 
 
 class ReadlengthDist:
 
-    def __init__(self, mu, sd=4000, lam=6000, eta=11):
-        # initialise as truncated normal dist
+    def __init__(self, mu: int, sd: int = 4000, lam: int = 6000, eta: int = 11):
+        """
+        Initializes a truncated normal distribution of read lengths.
+        Used as prior for read length distribution, gets updated throughout the experiment
+
+        :param mu: Length of anchor bases
+        :param lam: Lambda parameter of the distribution.
+        :param sd: Standard deviation of read lengths.
+        :param eta: Number of partitions in the piece-wise approximation.
+        """
         self.sd = sd
         self.lam = lam
         self.eta = eta
@@ -24,23 +26,23 @@ class ReadlengthDist:
         # prob density of normal distribution
         x = np.arange(longest_read, dtype='int')
         L = np.exp(-((x - lam + 1) ** 2) / (2 * (sd ** 2))) / (sd * np.sqrt(2 * np.pi))
-        # exclude reads shorter than mu
-        # L[:mu] = 0.0
-        # normalise
-        L /= sum(L)
+        L /= sum(L)           # normalise
         self.L = L
-        # transform lambda to read length from distribution mode
-        # mean_length = np.average(x, weights=L) + 1
-        # get the stepwise approx
+        # stepwise approx
         self.approx_ccl = self.ccl_approx_constant()
 
 
 
-    def update(self, read_lengths, recalc=False):
-        # loop through the reads to keep track of their lengths
+    def update(self, read_lengths: NDArray, recalc: bool = False):
+        """
+        Updates the distribution of read lengths.
+
+        :param read_lengths: Dictionary containing read IDs and their lengths.
+        :param recalc: Flag indicating whether to recalculate statistics.
+        """
+        # loop through reads and record their length in array
         for rid, length in read_lengths.items():
-            # assign length of this read to the recording array
-            # this is to ignore rejected reads for the read length dist
+            # ignore rejected reads for the read length dist
             # might overestimate the length slightly
             if length > self.mu * 2:
                 self.read_lengths[length] += 1
@@ -55,62 +57,30 @@ class ReadlengthDist:
             self.longest_read = np.max(np.where(self.read_lengths))
             self.L = np.copy(self.read_lengths[:self.longest_read]).astype('float64')
             self.L /= sum(self.L)
-            # update approx CCL
             self.approx_ccl = self.ccl_approx_constant()
             logging.info(f'rld: {self.approx_ccl}')
-            # update time cost
             # self.timeCost = self.lam - mu - rho
 
 
 
-    def ccl_approx_constant(self):
-        '''
-        CCL is 1-CL, with CL the cumulative distribution of read lengths (L).
-        \tilde CL in the manuscript section 0.1.3
-        CCL starts at 1 and decreases as one increases the considered length.
-        CCL[i] represents the probability that a random fragment (read) is at least i+1 long.
-        CLL is then replaced by a piece-wise constant function.
-        This is explained in the manuscript section 0.1.4 part "1) piecewise constant function".
-        eta determines how many pieces to have; having 30 pieces
-        makes updating the scores 3 times slower than having 10 pieces (at least I suspect)
-        so careful not to use too high eta, however higher eta
-        could improve the strategy.
-        approx_CCL[i] tells you that the probability of reads being at least
-        approx_CCL[i] long, is approximated by probability 1 - i / (eta-1),
-        while the probability of reads being at least approx_CCL[i]+1 long,
-        is approximated by probability 1-(i+1)/(eta-1).
-        This is the same as saying that approx_CCL[i] is the point of the i-th
-        change of value for the piece-wise constant function.
-        approx_CCL contains eta - 1 values because the first and the last
-        approximating probabilities are always 1 and 0 respectively.
+    def ccl_approx_constant(self) -> NDArray:
+        """
+        CCL is 1-CL (cumulative distribution) of read lengths (L).
+        Starts at 1 and decreases with increasing length.
+        CCL[i] is the probability that a read is at least i+1 long.
+        Plus approximated by piece-wise constant function with eta pieces
 
-        Parameters
-        ----------
-        L: np.array
-            array containing the distribution of read lengths
-        eta: int
-            how many pieces to have in the piece-wise approximation. More = slower
-            updating of the scores
-
-        Returns
-        -------
-        approx_CCL: np.array
-            array of length eta - 1, with each value as size of that
-            partition
-
-        '''
+        :return: approximated pieces of complementary cumulative read length distribution
+        """
         # complement of cumulative distribtuion of read lengths
         ccl = np.zeros(len(self.L) + 1)
         ccl[0] = 1
-        # instead of a loop we use numpy.cumsum, which generates an array itself
         ccl = 1 - self.L[1:].cumsum()
-        # cut distribution off at some point to reduce complexity
+        # cut distribution off to reduce complexity
         ccl[ccl < 1e-6] = 0
-        # or just trim zeros
         ccl = np.trim_zeros(ccl, trim='b')
         self.ccl = ccl
-        # to approx. U with a piecewise constant function
-        # more partitions = more accurate, but slower (see update_U())
+        # approx. with piecewise constant function
         approx_ccl = np.zeros(self.eta - 1, dtype='int32')
         i = 0
         for part in range(self.eta - 1):
@@ -119,4 +89,6 @@ class ReadlengthDist:
                 i += 1
             approx_ccl[part] = i
         return approx_ccl
+
+
 
