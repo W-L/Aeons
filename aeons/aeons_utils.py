@@ -3,8 +3,10 @@ from shutil import which
 from sys import executable
 from itertools import groupby
 import argparse
+from typing import Tuple, Callable, TextIO, Generator, Dict
 
 import numpy as np
+from numpy.typing import NDArray
 
 
 class MyArgumentParser(argparse.ArgumentParser):
@@ -22,12 +24,23 @@ def read_args_fromfile(parser, file):
 
 
 
-def empty_file(path):
+def empty_file(path: str) -> None:
+    """
+    Create an empty file at the specified path.
+
+    :param path: The path to the file.
+    """
     with open(path, 'w'): pass
     return
 
 
-def execute(command):
+def execute(command: str) -> Tuple[str, str]:
+    """
+    Execute a command in a shell and return the stdout and stderr.
+
+    :param command: The command to execute.
+    :return: The stdout and stderr as a tuple.
+    """
     # create the unix process
     running = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                encoding='utf-8', shell=True)
@@ -36,13 +49,27 @@ def execute(command):
     return stdout, stderr
 
 
-def spawn(comm):
+
+def spawn(comm: str) -> subprocess.Popen:
+    """
+    Spawn a subprocess with the specified command.
+
+    :param comm: The command to execute.
+    :return: The spawned subprocess.
+    """
     running = subprocess.Popen(comm, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                encoding='utf-8', shell=True)
     return running
 
 
-def write_logs(stdout, stderr, basename):
+def write_logs(stdout: str, stderr: str, basename: str) -> None:
+    """
+    Write the stdout and stderr from a subprocess to files.
+
+    :param stdout: The stdout output.
+    :param stderr: The stderr output.
+    :param basename: The base name for the log files.
+    """
     # write stdout and stderr from subprocess to file
     with open(f'{basename}.out', 'a') as outf:
         outf.write(stdout)
@@ -52,9 +79,17 @@ def write_logs(stdout, stderr, basename):
         errf.write('\n')
 
 
-def find_exe(name):
+def find_exe(name: str):
+    """
+    Find the executable file with the specified name.
+
+    :param name: The name of the executable.
+    :type name: str
+    :return: The path to the executable, or None if not found.
+    :rtype: str | None
+    """
     # shutil.which seems to work mostly but is still not completely portable
-    exe = which(name, path='/'.join(executable.split('/')[0:-1]))
+    exe = which(name, path='/'.join(executable.split('/')[:-1]))
     if not exe:
         exe = which(name)
     if not exe:
@@ -64,8 +99,15 @@ def find_exe(name):
     return exe.strip()
 
 
-def conv_type(s, func):
-    # Generic converter, to change strings to other types
+
+def conv_type(s: str, func: Callable) -> str:
+    """
+    Generic converter, to change strings to other types.
+
+    :param s: The string to convert.
+    :param func: The conversion function.
+    :return: The converted value or the original string if conversion fails.
+    """
     try:
         return func(s)
     except ValueError:
@@ -73,25 +115,12 @@ def conv_type(s, func):
 
 
 
-
-def readfq(fp):
+def readfq(fp: TextIO) -> Generator[Tuple[str, str, str, str]]:
     """
-    GENERATOR FUNCTION
-    Read a fastq file and return the sequence
-    Parameters
-    ----------
-    fp: _io.IO
-        File handle for the fastq file.
+    Read a fastq file and yield the entries.
 
-    Yields
-    -------
-    desc: str
-        The fastq read header
-    name: str
-        The read ID
-    seq: str
-        The sequence
-
+    :param fp: File handle for the fastq file.
+    :yield: A tuple containing the fastq read header, read ID, and sequence.
     """
     last = None  # this is a buffer keeping the last unprocessed line
     while True:  # mimic closure; is it a bad idea?
@@ -129,10 +158,13 @@ def readfq(fp):
 
 
 
+def init_logger(logfile: str, args: Dict) -> None:
+    """
+    Initialize the logger with the given logfile and log the arguments.
 
-
-
-def init_logger(logfile, args):
+    :param logfile: The path to the logfile.
+    :param args: The arguments to log.
+    """
     empty_file(logfile)
     import logging
     logging.basicConfig(format='%(asctime)s %(message)s',
@@ -147,21 +179,30 @@ def init_logger(logfile, args):
 
 
 
-def read_fa(fh):
-    # iterator for all headers in the file
+def read_fa(fh: TextIO) -> Generator[Tuple[str, str]]:
+    """
+    Generator for fasta files: yields all headers and sequences in the file.
+
+    :param fh: The file handle.
+    :yield: A tuple containing the header and sequence.
+    """
     faiter = (x[1] for x in groupby(fh, lambda line: line[0] == ">"))
     for header in faiter:
-        # drop the ">"
-        headerStr = header.__next__().strip().split(' ')[0]
-        # join all sequence lines to one.
+        headerStr = header.__next__().strip().split(' ')[0]  # drop the ">"
+        # join all sequence lines to one
         seq = "".join(s.strip() for s in faiter.__next__())
         yield headerStr, seq
 
 
 
-def simple_read_fa(fa):
-    read_sequences = {}
+def simple_read_fa(fa: str) -> Dict[str, str]:
+    """
+    Read sequences from a fasta file and return a dictionary.
 
+    :param fa: The path to the fasta file.
+    :return: A dictionary mapping headers to sequences.
+    """
+    read_sequences = {}
     with open(fa, 'r') as fa_file:
         for header, seq in read_fa(fa_file):
             read_sequences[header] = seq
@@ -169,7 +210,15 @@ def simple_read_fa(fa):
 
 
 
-def find_blocks_generic(arr, x, min_len):
+def find_blocks_generic(arr: NDArray, x: int, min_len: int) -> NDArray:
+    """
+    Find blocks in the array that match x.
+
+    :param arr: The input array.
+    :param x: The value to find blocks of.
+    :param min_len: The minimum length of blocks to report.
+    :return: An array containing the start and end positions of the blocks.
+    """
     # find run starts
     x_pos = np.where(arr == x)[0]
 
@@ -191,7 +240,15 @@ def find_blocks_generic(arr, x, min_len):
 
 
 
-def find_blocks_ge(arr, x, min_len):
+def find_blocks_ge(arr: NDArray, x: int, min_len: int) -> NDArray:
+    """
+    Find blocks in the array where the value is greater than or equal to x.
+
+    :param arr: The input array.
+    :param x: The value to compare against.
+    :param min_len: The minimum length of blocks to report.
+    :return: An array containing the start and end positions of the blocks.
+    """
     # find run starts
     x_pos = np.where(arr >= x)[0]
 
@@ -213,26 +270,14 @@ def find_blocks_ge(arr, x, min_len):
 
 
 
-
-def range_intersection(r1, r2):
-    return len(range(max(r1.start, r2.start), min(r1.stop, r2.stop)))
-
-
-def reverse_complement(dna):
+def reverse_complement(dna: str) -> str:
     """
-    Return the reverse complement of a dna string. Used when parsing the cigar
-    of a read that mapped on the reverse strand.
+    Return the reverse complement of a DNA string.
 
-    Parameters
-    ----------
-    dna: str
-        string of characters of the usual alphabet
-
-    Returns
-    -------
-    rev_comp: str
-        the reverse complemented input dna
-
+    :param dna: The DNA sequence.
+    :type dna: str
+    :return: The reverse complement of the input DNA.
+    :rtype: str
     """
     trans = str.maketrans('ATGC', 'TACG')
     rev_comp = dna.translate(trans)[::-1]
@@ -240,37 +285,46 @@ def reverse_complement(dna):
 
 
 
-def random_sparse(size, dens):
-    from scipy.sparse import random
-    # create a random matrix with some existing elements
-    m = random(m=size, n=size, density=dens, format="csr")
-    # how many are filled?
-    n_vals = m.data.shape[0]
-    # produce the filled 1s with random floats
-    vals = np.random.random(size=n_vals).astype("float")
-    vals = np.array([round(v, 2) for v in vals])
-    m.data = vals
-    return m
+def random_id(k: int = 20) -> str:
+    """
+    Generate a random alphanumeric ID of length k.
 
-
-def random_id(k=20):
+    :param k: The length of the ID.
+    :type k: int
+    :return: The generated random ID.
+    :rtype: str
+    """
     import random
     import string
     x = ''.join(random.choices(string.ascii_letters + string.digits, k=k))
     return x
 
 
-def window_sum(arr, w):
+
+def window_sum(arr: NDArray, w: int) -> float:
+    """
+    Calculate the sums of non-overlapping windows in the array.
+
+    :param arr: The input array.
+    :param w: The window size.
+    :return: The sums of the windows.
+    """
     # sums of non-overlapping windows
-    sumw = np.sum(arr[: (len(arr) // w) * w].reshape(-1, w), axis=1)
+    sumw = float(np.sum(arr[: (len(arr) // w) * w].reshape(-1, w), axis=1))
     return sumw
 
 
 
+def ascii_hist_values(values: NDArray, max_symbols: int = 50) -> str:
+    """
+    Generate an ASCII histogram for the input values.
+    inspired by https://gist.github.com/bgbg/608d9ef4fd75032731651257fe67fc81
+    by Boris Gorelik; License MIT
 
-def ascii_hist_values(values, max_symbols=50):
-    # inspired by https://gist.github.com/bgbg/608d9ef4fd75032731651257fe67fc81
-    # by Boris Gorelik; License MIT
+    :param values: The input values.
+    :param max_symbols: The maximum number of symbols in the histogram.
+    :return: The ASCII histogram as a string.
+    """
     # output is collected as lines in a list
     ret = []
     # cutoffs are the bin borders of the histogram
@@ -295,70 +349,14 @@ def ascii_hist_values(values, max_symbols=50):
 
 
 
-def redotable(fa, out, prg='/home/lukas/software/redotable/redotable_v1.1/redotable',
-              ref='/home/lukas/Desktop/Aeons/38_synmix/mod/ec.fa', size=1000,
-              logdir='redotable_log'):
-    # run redotable to create a dotplot compared to a reference
-    comm = f"{prg} --width {size} --height {size} --reordery {ref} {fa} {out}"
-    print(comm)
-    stdout, stderr = execute(comm)
-    write_logs(stdout, stderr, logdir)
+def load_gfa(gfa_path: str) -> Dict[str, str]:
+    """
+    Load a GFA file and return a dictionary of sequences.
 
-
-
-# might be unused
-def chunk_data(data, window_size, overlap_size=0):
-    from numpy.lib.stride_tricks import as_strided as ast
-    # put into column-vector
-    data = data.reshape((-1, 1))
-    # get number of overlapping windows that fit into the data
-    num_windows = (data.shape[0] - window_size) // (window_size - overlap_size) + 1
-    overhang = data.shape[0] - (num_windows*window_size - (num_windows-1)*overlap_size)
-    # if there's overhang, need an extra window and a zero pad on the data
-    if overhang != 0:
-        num_windows += 1
-        newdata = np.zeros((num_windows * window_size - (num_windows - 1) * overlap_size, data.shape[1]))
-        newdata[: data.shape[0]] = data
-        data = newdata
-
-    sz = data.dtype.itemsize
-    ret = ast(data,
-              shape=(num_windows, window_size*data.shape[1]),
-              strides=((window_size - overlap_size) * data.shape[1] * sz, sz))
-    return ret
-
-
-
-# unused in aeons directly
-def separate_by_species(paf):
-    from contextlib import ExitStack
-    # these need to be in the headers of the references mapped against
-    ref_names = ["lm", "pa", "bs", "sc", "ec", "se", "lf", "ef", "cn", "sa"]
-    # function to open a file for each ref_name
-
-    def open_files(ref_names):
-        fhs = {}
-        with ExitStack() as cm:
-            for name in ref_names:
-                fhs[name] = cm.enter_context(open(f'zymo_even_on_accurate-{name}.paf', 'a'))
-            cm.pop_all()
-            return fhs
-
-    fhs = open_files(ref_names)
-    # loop through the inputfile
-    # and separate out into individual files
-    with open(paf, 'r') as inpf:
-        for line in inpf:
-            ll = line.split('\t')
-            ref = ll[5].split('_')[0]
-            # write line to correct file
-            fhs[ref].write(line)
-
-
-
-def load_gfa(gfa_path):
-    # generator reading gfa
-    def _load_gfa(infile):
+    :param gfa_path: The path to the GFA file.
+    :return: A dictionary mapping header strings to sequence strings.
+    """
+    def _load_gfa(infile: str) -> Generator[Tuple[str, str]]:
         with open(infile, 'r') as gfa_file:
             for line in gfa_file:
                 if line.startswith('S'):
@@ -371,6 +369,18 @@ def load_gfa(gfa_path):
     for header, seq in _load_gfa(gfa_path):
         sequences[header] = seq
     return sequences
+
+
+
+def redotable(fa, out, prg='/home/lukas/software/redotable/redotable_v1.1/redotable',
+              ref='/home/lukas/Desktop/Aeons/38_synmix/mod/ec.fa', size=1000,
+              logdir='redotable_log'):
+    # run redotable to create a dotplot compared to a reference
+    comm = f"{prg} --width {size} --height {size} --reordery {ref} {fa} {out}"
+    print(comm)
+    stdout, stderr = execute(comm)
+    write_logs(stdout, stderr, logdir)
+
 
 
 
