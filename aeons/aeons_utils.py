@@ -3,7 +3,7 @@ from shutil import which
 from sys import executable
 from itertools import groupby
 import argparse
-from typing import Tuple, Callable, TextIO, Generator, Dict
+from typing import Tuple, Callable, TextIO, Dict
 
 import numpy as np
 from numpy.typing import NDArray
@@ -115,7 +115,7 @@ def conv_type(s: str, func: Callable) -> str:
 
 
 
-def readfq(fp: TextIO) -> Generator[Tuple[str, str, str, str]]:
+def readfq(fp: TextIO):
     """
     Read a fastq file and yield the entries.
 
@@ -179,7 +179,7 @@ def init_logger(logfile: str, args: Dict) -> None:
 
 
 
-def read_fa(fh: TextIO) -> Generator[Tuple[str, str]]:
+def read_fa(fh: TextIO):
     """
     Generator for fasta files: yields all headers and sequences in the file.
 
@@ -356,7 +356,7 @@ def load_gfa(gfa_path: str) -> Dict[str, str]:
     :param gfa_path: The path to the GFA file.
     :return: A dictionary mapping header strings to sequence strings.
     """
-    def _load_gfa(infile: str) -> Generator[Tuple[str, str]]:
+    def _load_gfa(infile: str):
         with open(infile, 'r') as gfa_file:
             for line in gfa_file:
                 if line.startswith('S'):
