@@ -2,25 +2,11 @@ import subprocess
 from shutil import which
 from sys import executable
 from itertools import groupby
-import argparse
+from argparse import Namespace
 from typing import Tuple, Callable, TextIO, Dict
 
 import numpy as np
 from numpy.typing import NDArray
-
-
-class MyArgumentParser(argparse.ArgumentParser):
-    def convert_arg_line_to_args(self, arg_line):
-        return arg_line.split()
-
-
-
-
-def read_args_fromfile(parser, file):
-    with open(file, 'r') as f:
-        arguments = [ll for line in f for ll in line.rstrip().split()]
-    args = parser.parse_args(args=arguments)
-    return args
 
 
 
@@ -30,7 +16,8 @@ def empty_file(path: str) -> None:
 
     :param path: The path to the file.
     """
-    with open(path, 'w'): pass
+    with open(path, 'w'):
+        pass
     return
 
 
@@ -156,9 +143,7 @@ def readfq(fp: TextIO):
 
 
 
-
-
-def init_logger(logfile: str, args: Dict) -> None:
+def init_logger(logfile: str, args: Namespace) -> None:
     """
     Initialize the logger with the given logfile and log the arguments.
 
@@ -372,14 +357,14 @@ def load_gfa(gfa_path: str) -> Dict[str, str]:
 
 
 
-def redotable(fa, out, prg='/home/lukas/software/redotable/redotable_v1.1/redotable',
-              ref='/home/lukas/Desktop/Aeons/38_synmix/mod/ec.fa', size=1000,
-              logdir='redotable_log'):
-    # run redotable to create a dotplot compared to a reference
-    comm = f"{prg} --width {size} --height {size} --reordery {ref} {fa} {out}"
-    print(comm)
-    stdout, stderr = execute(comm)
-    write_logs(stdout, stderr, logdir)
+# def redotable(fa, out, prg='/home/lukas/software/redotable/redotable_v1.1/redotable',
+#               ref='/home/lukas/Desktop/Aeons/38_synmix/mod/ec.fa', size=1000,
+#               logdir='redotable_log'):
+#     # run redotable to create a dotplot compared to a reference
+#     comm = f"{prg} --width {size} --height {size} --reordery {ref} {fa} {out}"
+#     print(comm)
+#     stdout, stderr = execute(comm)
+#     write_logs(stdout, stderr, logdir)
 
 
 
