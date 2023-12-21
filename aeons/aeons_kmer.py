@@ -155,8 +155,8 @@ class KmerCounter:
         kmers[2] = self.count(seq, 4)
         # calculate expected frequencies
         tetramer_exp = self.expected_tetramer_frequencies(kmers)
-        tetramer_zscores = self.estimate_zscores(km=kmers, tetra_exp=tetramer_exp)
-        return tetramer_zscores
+        tm_zscores = self.estimate_zscores(km=kmers, tetra_exp=tetramer_exp)
+        return tm_zscores
 
 
 
