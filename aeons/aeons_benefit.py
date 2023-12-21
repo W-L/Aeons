@@ -59,7 +59,7 @@ def calc_fragment_benefit(scores: NDArray, mu: int, node_size: int, approx_ccl: 
     # expand score to account for contig ends
     mu_ds = mu // node_size
     ccl_ds = approx_ccl // node_size
-    ccl_max = ccl_ds[-1]
+    ccl_max = int(ccl_ds[-1])
     sx = _expand_scores(scores, e1, e2, ccl_max)
     smu = _calc_smu_moving(score=sx, mu_ds=mu_ds)
     benefit = _calc_benefit_moving(score=sx, ccl_ds=ccl_ds)
@@ -118,8 +118,8 @@ def _calc_benefit_moving(score: NDArray, ccl_ds: NDArray) -> NDArray:
     perc = np.arange(0.1, 1.1, 0.1)[::-1]
     assert perc.shape == ccl_ds.shape
     for i in range(ccl_ds.shape[0]):
-        ben_fwd = bn.move_sum(score, window=ccl_ds[i], min_count=1)[ccl_ds[i]: -1]
-        ben_rev = bn.move_sum(score_rev, window=ccl_ds[i], min_count=1)[ccl_ds[i]: -1]
+        ben_fwd = bn.move_sum(score, window=int(ccl_ds[i]), min_count=1)[ccl_ds[i]: -1]
+        ben_rev = bn.move_sum(score_rev, window=int(ccl_ds[i]), min_count=1)[ccl_ds[i]: -1]
         benefit[0, 0: -ccl_ds[i] - 1] += ben_fwd * perc[i]
         benefit[1, ccl_ds[i]: -1] += ben_rev[::-1] * perc[i]
     return benefit
