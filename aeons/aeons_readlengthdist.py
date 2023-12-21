@@ -33,12 +33,11 @@ class ReadlengthDist:
 
 
 
-    def update(self, read_lengths: NDArray, recalc: bool = False):
+    def update(self, read_lengths: dict):
         """
         Updates the distribution of read lengths.
 
         :param read_lengths: Dictionary containing read IDs and their lengths.
-        :param recalc: Flag indicating whether to recalculate statistics.
         """
         # loop through reads and record their length in array
         for rid, length in read_lengths.items():
@@ -50,16 +49,15 @@ class ReadlengthDist:
                 continue
 
         # calc current stats of read lengths
-        if recalc:
-            observed_read_lengths = np.nonzero(self.read_lengths)
-            length_sum = np.sum(observed_read_lengths * self.read_lengths[observed_read_lengths])
-            self.lam = length_sum / np.sum(self.read_lengths[observed_read_lengths])
-            self.longest_read = np.max(np.where(self.read_lengths))
-            self.L = np.copy(self.read_lengths[:self.longest_read]).astype('float64')
-            self.L /= sum(self.L)
-            self.approx_ccl = self.ccl_approx_constant()
-            logging.info(f'rld: {self.approx_ccl}')
-            # self.timeCost = self.lam - mu - rho
+        observed_read_lengths = np.nonzero(self.read_lengths)
+        length_sum = np.sum(observed_read_lengths * self.read_lengths[observed_read_lengths])
+        self.lam = length_sum / np.sum(self.read_lengths[observed_read_lengths])
+        self.longest_read = np.max(np.where(self.read_lengths))
+        self.L = np.copy(self.read_lengths[:self.longest_read + 1]).astype('float64')
+        self.L /= sum(self.L)
+        self.approx_ccl = self.ccl_approx_constant()
+        logging.info(f'rld: {self.approx_ccl}')
+        # self.timeCost = self.lam - mu - rho
 
 
 
@@ -75,7 +73,7 @@ class ReadlengthDist:
         # complement of cumulative distribtuion of read lengths
         ccl = np.zeros(len(self.L) + 1)
         ccl[0] = 1
-        ccl = 1 - self.L[1:].cumsum()
+        ccl[1:] = 1 - np.concatenate((self.L[1:].cumsum(), np.ones(1)))
         # cut distribution off to reduce complexity
         ccl[ccl < 1e-6] = 0
         ccl = np.trim_zeros(ccl, trim='b')
