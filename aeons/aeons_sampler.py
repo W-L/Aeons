@@ -127,7 +127,8 @@ class FastqStream:
         return batch
 
 
-    def _get_random_read(self, filepath: str) -> str:
+    @staticmethod
+    def _get_random_read(filepath: str) -> str:
         """
         Get a random read from the file.
 
@@ -322,7 +323,7 @@ class FastqStream_mmap:
 
             for new_offset in new_offsets:
                 # we preload 20 pages of data following each read start
-                # 20 pages = 80 kbytes (read of up to ~40 kbases, I think..)
+                # 20 pages = 80 kbytes (read of up to ~40 kbases, I think)
                 mm.madvise(mmap.MADV_RANDOM)
                 mm.madvise(mmap.MADV_WILLNEED, int(new_offset), 20)
 
@@ -330,7 +331,7 @@ class FastqStream_mmap:
             for i in range(len(batch_offsets)):
                 try:
                     # jump to position in file and return the next 4 lines
-                    chunk = self._get_single_read(mm=mm, offset=batch_offsets[i])
+                    chunk = self._get_single_read(mm=mm, offset=int(batch_offsets[i]))
                     batch[i] = chunk
                 except:
                     logging.info(f"Error at location: {batch_offsets[i]}")
@@ -354,8 +355,8 @@ class FastqStream_mmap:
         return read_lengths, read_sequences, read_sources, basesTOTAL
 
 
-
-    def _get_single_read(self, mm: Any, offset: int) -> str:
+    @staticmethod
+    def _get_single_read(mm: Any, offset: int) -> str:
         """
         Return 4 lines from a memory-mapped fastq file given a byte-wise position.
 
