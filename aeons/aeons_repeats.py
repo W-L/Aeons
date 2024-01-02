@@ -1,51 +1,13 @@
-from copy import deepcopy
 import logging
+from typing import Dict
+
 import numpy as np
-from collections import defaultdict
 
 from .aeons_mapper import LinearMapper
-from .aeons_utils import ascii_hist_values, find_blocks_ge
+from .aeons_utils import find_blocks_ge
 from .aeons_sequence import SequencePool
 
 
-class Repeat:
-
-    def __init__(self, rid=None, side=None):
-        self.rid = rid
-        self.side = side
-        self.starts = []
-        self.ends = []
-        self.start = 0
-        self.end = 0
-        self.degree = 0
-        self.strands = []
-
-
-    def calc_ranges(self):
-        # get the means of starts and ends to define the repeat
-        self.start = int(np.mean(self.starts))
-        self.end = int(np.mean(self.ends))
-
-
-    def get_sequence(self, seqpool):
-        # index into seqpool and trim
-        seq = seqpool[self.rid].seq[self.start: self.end]
-        return seq
-
-
-    def fasta(self, seqpool):
-        # after collecting all edges
-        # calc mean of ranges
-        self.calc_ranges()
-        # then extract the sequence
-        seq = self.get_sequence(seqpool)
-        self.length = len(seq)
-        if not self.length:
-            return ""
-        # construct fasta entry
-        header = f'{self.rid}-{self.side}-{self.start}:{self.end}'
-        fa = f'>{header}\n{seq}\n'
-        return fa
 
 
 class RepeatFilter:
@@ -56,179 +18,14 @@ class RepeatFilter:
      - map batches to repeat library for filtering
 
     """
-    def __init__(self, name, ava_dict, seqpool, filters):
-        # constant values for PafLine filtering
-        self.filters = filters
-        # name for library file
-        self.library = f'{name}.repeat_lib.fa'
-        lim = self.repeat_degree_limit(ava_dict)
-        # collect repeat overlaps in the given ava_dict
-        repeats = self.collect_repeats(ava_dict, lim=lim)
-        # write out the fasta file
-        self.write_library(repeats, seqpool)
-        # initialise a LinearMapper object
-        self.lm = LinearMapper(ref=self.library)
-        # get the ids of the affected reads
-        self.affected_sids = self.filter_construction_seqs(repeats)
 
+    def __init__(self, name: str, seqpool: SequencePool):
+        """
+        Initialise a RepeatFilter, incl indexing the sequences, chopping and mapping them
 
-    def repeat_degree_limit(self, ava_dict):
-        # check the degree of all nodes in the graph
-        degree = self.node_degree(ava_dict)
-        # make little histogram plot
-        logging.info("degree distribution of initial graph")
-        logging.info("\n" + ascii_hist_values(degree))
-        # detect limit
-        lim = np.quantile(degree, 0.95)
-        if lim < 3:
-            lim = 3
-        logging.info(f"detecting repeats at degree >{lim}")
-        return lim
-
-
-    def node_degree(self, ava_dict):
-        # automatic way of finding the degree to declare repeats
-        degree = []
-        # indexing ava_dict returns node, dict for each end
-        for node, edge_dict in ava_dict.items():
-            for side, avas in edge_dict.items():
-                degree.append(len(avas))
-        return degree
-
-
-    def collect_repeats(self, ava_dict, lim=4):
-        n_edges = []
-        repeats = defaultdict(Repeat)
-        # indexing ava_dict returns node, dict for each end
-        for node, edge_dict in ava_dict.items():
-            for side, avas in edge_dict.items():
-                # only nodes with more than lim edges are considered
-                n = len(avas)
-                n_edges.append(n)
-                if n < lim:
-                    continue
-                # loop through edges from the query end
-                for rec in avas.values():
-                    # grab the repeats
-                    repo = repeats[f'{node}-{side}']
-                    repo.rid, repo.side = node, side
-
-                    # ATTENTION node is not always the query!
-                    if rec.qname == node:
-                        start = rec.qstart
-                        end = rec.qend
-                        if rec.rev:
-                            strand = 1
-                        else:
-                            strand = 0
-                    elif rec.tname == node:
-                        start = rec.tstart
-                        end = rec.tend
-                        strand = 0
-                    else:
-                        # should never be the case
-                        print("node name not in paf record")
-                        continue
-
-                    # apply repo attr
-                    repo.starts.append(start)
-                    repo.ends.append(end)
-                    repo.strands.append(strand)
-                    repo.degree = n
-
-        return repeats
-
-
-    def write_library(self, repeats, seqpool):
-        # after collecting all repeats, extract their sequences
-        n_seqs = 0
-        total_seq = 0
-        with open(self.library, 'w') as repfa:
-            for node, repeat in repeats.items():
-                fa = repeat.fasta(seqpool)
-                repfa.write(fa)
-                n_seqs += 1
-                total_seq += repeat.length
-        logging.info(f'{n_seqs} repeat sequences with {total_seq} bases total')
-
-
-    def filter_construction_seqs(self, repeats):
-        # after initialising the RepeatFilter we want to get rid of the affected sequences
-        repeat_sids = set()
-        for node, repeat in repeats.items():
-            repeat_sids.add(repeat.rid)
-        logging.info(f"filtering {len(repeat_sids)} sequences after constructing repeat library")
-        return repeat_sids
-
-
-    def filter_batch(self, seq_dict):
-        # takes as input a dict of sequences
-        logging.info("repeat filtering this batch of reads")
-        # first map them to the library
-        paf_dict = self.lm.map_sequences(seq_dict)
-        # then classify the mappings
-        filter_ids = self.filter_pafdict(paf_dict)
-        # return the filtered sequence dict
-        filt_dict = deepcopy(seq_dict)
-        for fid in filter_ids:
-            filt_dict.pop(fid, None)
-        return filt_dict
-
-
-    def filter_pafdict(self, paf_dict):
-        # THIS IS MODELED AFTER SequenceAVA.load_ava()
-        filter_ids = set()
-        for rid, record_list in paf_dict.items():
-            for rec in record_list:
-                # check if this mapping passes the filters
-                is_filtered = rec.filter(filters=self.filters)
-                if is_filtered:
-                    continue
-
-                # classify the alignment
-                rec.classify()
-
-                if rec.c == 1:
-                    # internal match
-                    continue
-                elif rec.c == 2:
-                    # first contained
-                    filter_ids.add(rec.qname)
-                elif rec.c == 3:
-                    # second contained
-                    # if the repeat is contained within the query, we want that read!
-                    continue
-                elif rec.c in {4, 5}:
-                    # overlaps[(f'{rec.qname}-{rec.qside}', f'{rec.tname}-{rec.tside}')] = rec
-                    filter_ids.add(rec.qname)
-                else:
-                    pass
-        logging.info(f"repeat filtering {len(filter_ids)} sequences from this batch")
-        return filter_ids
-
-
-    def update_library(self):
-        # TODO maybe implement an aupdate to the repeat library
-        pass
-
-
-    def cluster_sequences(self):
-        # TODO cluster together the repeats to decrease the library size
-        pass
-
-
-
-
-class RepeatFilter2:
-    """
-    A class to:
-     - extract repeats
-     - generate a fasta
-     - map batches to repeat library for filtering
-
-    """
-
-    def __init__(self, name, seqpool):
+        :param name: Name of experiment
+        :param seqpool: Sequence pool of initial data
+        """
         self.seqpool = seqpool
         self.name = name
         self.library = f'{name}.repeat_lib.fa'
@@ -236,20 +33,32 @@ class RepeatFilter2:
         SequencePool.write_seq_dict(seqpool.seqdict(), f'{name}.seqs.fa')
         lr_mapper = LinearMapper(ref=f'{name}.seqs.fa')
         # chop and map all sequences
-        little_seqs = self.chop_seqs()
+        little_seqs = self._chop_seqs()
         mappings = lr_mapper.mappy_batch(sequences=little_seqs)
-        # parse mappings
-        covs = self.count_cov(mappings)
+        covs = self._count_cov(mappings)
+        # # DEBUG write mappings to file
+        # with open("little_seqs_mappings.paf", 'w') as lsm:
+        #     lsm.write(mappings)
+        # import pickle
+        # with open("coverage.pkl", 'wb') as covpkl:
+        #     pickle.dump(covs, covpkl)
+
         # find the min cov for repeats
-        lim = self.find_limit(covs)
+        lim = self._find_limit(covs)
         # find repeats
-        repeat_blocks = self.identify_repeat_sites(lim, covs)
+        repeat_blocks = self._identify_repeat_sites(lim, covs)
         # write to library file
-        self.repeats = self.write_repeat_seqs(repeat_blocks)
+        self.repeats = self._write_repeat_seqs(repeat_blocks)
 
 
-    def chop_seqs(self, window=100, step=100):
-        # chop the current sequences into smaller bits
+    def _chop_seqs(self, window: int = 100, step: int = 100) -> Dict:
+        """
+        Chop the current sequences into smaller bits using a sliding window
+
+        :param window: Size of sliding window
+        :param step: Stepsize of sliding windows
+        :return: Dictionary of chopped sequences to map
+        """
         seqs = self.seqpool.seqdict()
         little_seqs = {}
         for header, seq in seqs.items():
@@ -264,9 +73,14 @@ class RepeatFilter2:
         return little_seqs
 
 
+    @staticmethod
+    def _count_cov(mappings: str) -> Dict:
+        """
+        loop through mappings and count the coverage of all targets
 
-    def count_cov(self, mappings):
-        # loop through mappings and count the coverage of all targets
+        :param mappings: String of a PAF file
+        :return: Dictionary of summed up coverages
+        """
         covs = {}
         for line in mappings.split('\n'):
             rec = line.split('\t')
@@ -279,7 +93,8 @@ class RepeatFilter2:
         return covs
 
 
-    def find_limit(self, covs):
+    @staticmethod
+    def _find_limit(covs: Dict) -> float:
         # find the max value first
         maximum = 0
         for c in covs.values():
@@ -298,13 +113,20 @@ class RepeatFilter2:
         # limit
         lim = np.quantile(np.repeat(np.arange(len(bcounts)), repeats=bcounts), 0.999)
         if lim < 3:
-            lim = 3
-
+            lim = 3.0
         return lim
 
 
-    def identify_repeat_sites(self, lim, covs):
-        # find positions where repeat
+    @staticmethod
+    def _identify_repeat_sites(lim: float, covs: Dict) -> Dict:
+        """
+        find positions where supposed repeats are in sequences
+
+        :param lim: Limit of coverage to consider repeat
+        :param covs: Dict of parsed coverages
+        :return: Dict of repeat blocks for each header
+        """
+
         repeat_blocks = {}
         for header, cov in covs.items():
             blocks = find_blocks_ge(cov, lim, min_len=100)
@@ -313,14 +135,19 @@ class RepeatFilter2:
         return repeat_blocks
 
 
-    def write_repeat_seqs(self, repeat_blocks):
-        # write the repeat seqs to file
+    def _write_repeat_seqs(self, repeat_blocks: Dict) -> Dict:
+        """
+        Write the repeat seqs to file and collect them in dictionary
+
+        :param repeat_blocks: Dict of repeat block coordinates
+        :return: Dict of repeat sequences
+        """
         n_seqs = 0
         repeats = {}
         with open(self.library, 'w') as fh:
             for header, blocks in repeat_blocks.items():
                 for start, end in blocks:
-                    r = Repeat2(header, start, end)
+                    r = Repeat(header, start, end)
                     r.get_sequence(seqpool=self.seqpool.sequences)
                     fa = r.fasta()
                     fh.write(fa)
@@ -329,9 +156,34 @@ class RepeatFilter2:
         return repeats
 
 
+    @staticmethod
+    def _check_coverage(rep_cov: Dict, window: int = 500) -> set:
+        """
+        Check whether a read has a potential repeat on either end
 
-    def filter_batch(self, seq_dict):
-        # takes as input a dict of sequences
+        :param rep_cov: Dict of coverage counts
+        :param window: size of end windows
+        :return: set of read ids with potential repeats at end
+        """
+        danger = set()
+        for header, rcov in rep_cov.items():
+            beginning = rcov[: window]
+            if np.sum(beginning) > 5:
+                danger.add(header)
+            ending = rcov[window:]
+            if np.sum(ending) > 5:
+                danger.add(header)
+        return danger
+
+
+
+    def filter_batch(self, seq_dict: Dict) -> set:
+        """
+        Check a dict of input sequences against a repeat library
+
+        :param seq_dict: Dict of input sequences
+        :return: Set of sequences with potential repeats at the end
+        """
         logging.info("repeat filtering batch of reads")
         # write batch to file
         bfile = f'{self.name}.batch.fa'
@@ -339,48 +191,50 @@ class RepeatFilter2:
             for header, seq in seq_dict.items():
                 fa = f'>{header}\n{seq}\n'
                 fh.write(fa)
-
         # initialise a LinearMapper object
         lm = LinearMapper(ref=bfile)
         # first map them to the library
         mappings = lm.mappy_batch(self.repeats)
-        rep_cov = self.count_cov(mappings)
-        danger_ids = self.check_coverage(rep_cov)
+        rep_cov = self._count_cov(mappings)
+        danger_ids = self._check_coverage(rep_cov)
         return danger_ids
 
 
 
 
-    def check_coverage(self, rep_cov, window=500):
-        # check whether a read has a repeat on either end
-        danger = set()
-        for header, rcov in rep_cov.items():
-            beginning = rcov[: window]
-            if np.sum(beginning) > 5:
-                danger.add(header)
-            ending = rcov[window: ]
-            if np.sum(ending) > 5:
-                danger.add(header)
-        return danger
+class Repeat:
 
+    def __init__(self, rid: str = None, start: int = 0, end: int = -1):
+        """
+        Initialise a repeat object
 
-
-
-class Repeat2:
-
-    def __init__(self, rid=None, start=0, end=-1):
+        :param rid: ID of source sequence
+        :param start: Start pos on source sequence
+        :param end: End pos on source sequence
+        """
         self.rid = rid
         self.start = start
         self.end = end
         self.seq = ''
 
 
-    def get_sequence(self, seqpool):
+    def get_sequence(self, seqpool: Dict):
+        """
+        Get sequence from Sequencepool dict using ID and coordinates
+
+        :param seqpool: Dict of SequencePool, i.e. SequencePool.sequences
+        :return:
+        """
         # index into seqpool and trim
         self.seq = seqpool[self.rid].seq[self.start: self.end]
 
 
-    def fasta(self):
+    def fasta(self) -> str:
+        """
+        Generate fasta representation of itself
+
+        :return: string representation in FASTA format
+        """
         if not self.seq:
             return ""
         # construct fasta entry
