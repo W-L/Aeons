@@ -195,7 +195,7 @@ def find_blocks_generic(arr: NDArray, x: int, min_len: int) -> NDArray:
 
 
 
-def find_blocks_ge(arr: NDArray, x: int, min_len: int) -> NDArray:
+def find_blocks_ge(arr: NDArray, x: float, min_len: int) -> NDArray:
     """
     Find blocks in the array where the value is greater than or equal to x.
 
