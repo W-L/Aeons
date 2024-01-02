@@ -111,17 +111,19 @@ class PafLine:
         # second chance for internal matches
         # consider them as ovl under special circumstances
         if c == 1:
-            if self.internal_match_is_overlap():
+            if self._first_contained_mostly():
+                c = 2
+            elif self._second_contained_mostly():
+                c = 3
+            elif self.internal_match_is_overlap():
                 c = 6  # class 6: needs trimming
+            else:
+                pass
 
         return c
 
 
-
-    def _internal_match(self, max_overhang=1000, overhang2mapping_ratio=0.8):
-        # im = True if self.overhang() > min(max_overhang,
-        #                                    (self.map_length() * overhang2mapping_ratio)) else False
-        # return im
+    def _internal_match(self):
         if self.overhang() > (self.map_length() * 0.15):
             return True
         else:
@@ -160,7 +162,7 @@ class PafLine:
 
     def _first_contained_fallback(self):
         qcov = self.qend - self.qstart
-        if (qcov / self.qlen) >= 0.95:
+        if (qcov / self.qlen) >= 0.90:
             return True
         else:
             return False
@@ -168,7 +170,22 @@ class PafLine:
 
     def _second_contained_fallback(self):
         tcov = self.tend - self.tstart
-        if (tcov / self.tlen) >= 0.95:
+        if (tcov / self.tlen) >= 0.90:
+            return True
+        else:
+            return False
+
+
+    def _first_contained_mostly(self):
+        qcov = self.qend - self.qstart
+        if (qcov / self.qlen) >= 0.50 and self.qlen > 20000:
+            return True
+        else:
+            return False
+
+    def _second_contained_mostly(self):
+        tcov = self.tend - self.tstart
+        if (tcov / self.tlen) >= 0.50 and self.qlen > 20000:
             return True
         else:
             return False
@@ -177,7 +194,7 @@ class PafLine:
     def _overlap_orientation(self):
         if not self.rev:
             if self.qstart > self.tstart:
-                # A overlaps B
+                # 'A' overlaps 'B'
                 # a + b +
                 return 4, 'R', 'L'
             else:
@@ -186,7 +203,7 @@ class PafLine:
                 return 5, 'L', 'R'
         elif self.qstart > (self.qlen - self.qend):
             if self.qstart > (self.tlen - self.tend):
-                # A overlaps B
+                # 'A' overlaps 'B'
                 # a + b -
                 return 4, 'R', 'R'    # should this be LR?
             else:
@@ -194,27 +211,13 @@ class PafLine:
                 # b + a -
                 return 5, 'R', 'R'
         elif (self.qlen - self.qstart) > self.tend:
-            # A overlaps B
+            # 'A' overlaps 'B'
             # a - b +
             return 4, 'L', 'L'   # should this be RL?
         else:
             # B overlaps A
             # b - a +
             return 5, 'L', 'L'
-
-
-    # def _self_aligned_partials(self):
-    #     # split merged headers
-    #     h1rs = set(self.qname.replace('^', '').replace('%', '').split('_'))
-    #     h2rs = set(self.tname.replace('^', '').replace('%', '').split('_'))
-    #     h1rs = {s for s in h1rs if len(s) > 10}
-    #     h2rs = {s for s in h2rs if len(s) > 10}
-    #     header_intersect = h1rs & h2rs
-    #     # if both alignments contain a shared header
-    #     if len(header_intersect) > 0:
-    #         return True
-    #     else:
-    #         return False
 
 
     def _self_aligned(self):
@@ -231,20 +234,8 @@ class PafLine:
             return False
 
 
-    # def _is_prox2(self, start, end, length, lim_perc=0.1, lim_nuc=5000):
-    #     # check if either end of the mapped regions
-    #     # is close to the end of the record
-    #     lim = min(length * lim_perc, lim_nuc)
-    #
-    #     prox_start = (abs(0 - start) / length) < lim
-    #     prox_end = (abs(length - end) / length) < lim
-    #     if prox_start or prox_end:
-    #         return True
-    #     else:
-    #         return False
-
-
-    def _is_prox(self, start, end, length, lim=1000.0):
+    @staticmethod
+    def _is_prox(start, end, length, lim=1000.0):
         # check if a record has a mapped region close to one of its ends
         # masm definition would be lim = 1000
         # a fixed basepair limit does not work for us, we need to trim off more
@@ -259,7 +250,7 @@ class PafLine:
 
 
     def _im_ovl_restrictions(self, min_seqlen=15000, min_maplen=5000):
-        # check some other restrictions to count IM as OVL
+        # check some other restrictions to count internal match as OVL
         maplen = self.map_length()
         if self.qlen > min_seqlen:
             if self.tlen > min_seqlen:
@@ -294,7 +285,8 @@ class PafLine:
         return False
 
 
-    def _find_coords(self, start, end, length):
+    @staticmethod
+    def _find_coords(start, end, length):
         # which side is closer to the end?
         min_overhang_idx = np.argmin([start, length - end])
         if min_overhang_idx == 0:
@@ -368,88 +360,62 @@ class PafLine:
 
 
 
-    def plot(self, save=None):
-        import plotnine as p9
-        import pandas as pd
-        # this puts together the coordinates for the polygon
-        # 5 points, starting at the lower left end
-        if self.strand == '+':
-            cols = ['qstart', 'qend', 'tend', 'tstart', 'qstart']
-        else:
-            cols = ["qend", "qstart", "tend", "tstart", "qend"]
-
-        pos = [getattr(self, c) for c in cols]
-        # the query is always on top
-        seqn = [2, 2, 1, 1, 2]
-        cdat = pd.DataFrame({'pos': pos, 'seqn': seqn})
-        # coordinates of the read rectangles
-        seqlens = pd.DataFrame({'seq': [self.qname[:10], self.tname[:10]],
-                                'start': [0, 0],
-                                'end': [self.qlen, self.tlen],
-                                'bottoms': [2.05, 0.8],
-                                'tops': [2.2, 0.95]})
-
-        xpos = 100
-        qpos = 1.9
-        tpos = 1.1
-        p = (p9.ggplot() +
-             p9.geom_polygon(data=cdat,
-                             mapping=p9.aes(x="pos", y="seqn"),
-                             fill="grey", colour="black") +
-             p9.geom_rect(data=seqlens,
-                          mapping=p9.aes(xmin="start", xmax="end",
-                                         ymin="bottoms", ymax="tops"),
-                          colour="black", fill=None) +
-             p9.annotate(x=xpos, label=self.qname[:10], y=2.12, geom='text', ha="left", va="center") +
-             p9.annotate(x=xpos, label=self.tname[:10], y=0.87, geom='text', ha="left", va="center") +
-             p9.annotate(x=self.qstart, label=self.qstart, y=qpos, color="darkred",
-                         geom='text', ha="left", va="center") +
-             p9.annotate(x=self.qend, label=self.qend, y=qpos, color="darkred",
-                         geom='text', ha="left", va="center") +
-             p9.annotate(x=self.tstart, label=self.tstart, y=tpos, color="darkblue",
-                         geom='text', ha="left", va="center") +
-             p9.annotate(x=self.tend, label=self.tend, y=tpos, color="darkblue",
-                         geom='text', ha="left", va="center") +
-             p9.annotate(x=xpos, label=self.strand, y=1.4, color="darkgoldenrod",
-                         geom='text', ha="left", va="center", size=30) +
-             p9.ylab("") +
-             p9.xlab("") +
-             p9.theme_minimal() +
-             p9.theme(axis_text_y=p9.element_blank(),
-                      axis_ticks_major_y=p9.element_blank(),
-                      plot_background=p9.element_rect(fill="white", color="white")))
-        if save:
-            p.save(save)
-        else:
-            return p
-
-
-    # def find_side(self, lim=0.1):
-    #     # find the side of a dovetail
-    #     ts_prox = (abs(0 - self.tstart) / self.tlen) < lim
-    #     te_prox = (abs(self.tlen - self.tend) / self.tlen) < lim
-    #     qside = 0
-    #     tside = 0
-    #
-    #     if ts_prox:
-    #         if not self.rev:
-    #             qside = 'R'
-    #         else:
-    #             qside = 'L'
-    #         tside = 'L'
-    #
-    #     elif te_prox:
-    #         if not self.rev:
-    #             qside = 'L'
-    #         else:
-    #             qside = 'R'
-    #         tside = 'R'
-    #
+    # for debugging
+    # def plot(self, save=None):
+    #     # visualize alignments as blocks
+    #     import plotnine as p9
+    #     import pandas as pd
+    #     # this puts together the coordinates for the polygon
+    #     # 5 points, starting at the lower left end
+    #     if self.strand == '+':
+    #         cols = ['qstart', 'qend', 'tend', 'tstart', 'qstart']
     #     else:
-    #         print("no prox, where prox expected")
+    #         cols = ["qend", "qstart", "tend", "tstart", "qend"]
     #
-    #     self.qside = qside
-    #     self.tside = tside
+    #     pos = [getattr(self, c) for c in cols]
+    #     # the query is always on top
+    #     seqn = [2, 2, 1, 1, 2]
+    #     cdat = pd.DataFrame({'pos': pos, 'seqn': seqn})
+    #     # coordinates of the read rectangles
+    #     seqlens = pd.DataFrame({'seq': [self.qname[:10], self.tname[:10]],
+    #                             'start': [0, 0],
+    #                             'end': [self.qlen, self.tlen],
+    #                             'bottoms': [2.05, 0.8],
+    #                             'tops': [2.2, 0.95]})
+    #
+    #     xpos = 100
+    #     qpos = 1.9
+    #     tpos = 1.1
+    #     p = (p9.ggplot() +
+    #          p9.geom_polygon(data=cdat,
+    #                          mapping=p9.aes(x="pos", y="seqn"),
+    #                          fill="grey", colour="black") +
+    #          p9.geom_rect(data=seqlens,
+    #                       mapping=p9.aes(xmin="start", xmax="end",
+    #                                      ymin="bottoms", ymax="tops"),
+    #                       colour="black", fill=None) +
+    #          p9.annotate(x=xpos, label=self.qname[:10], y=2.12, geom='text', ha="left", va="center") +
+    #          p9.annotate(x=xpos, label=self.tname[:10], y=0.87, geom='text', ha="left", va="center") +
+    #          p9.annotate(x=self.qstart, label=self.qstart, y=qpos, color="darkred",
+    #                      geom='text', ha="left", va="center") +
+    #          p9.annotate(x=self.qend, label=self.qend, y=qpos, color="darkred",
+    #                      geom='text', ha="left", va="center") +
+    #          p9.annotate(x=self.tstart, label=self.tstart, y=tpos, color="darkblue",
+    #                      geom='text', ha="left", va="center") +
+    #          p9.annotate(x=self.tend, label=self.tend, y=tpos, color="darkblue",
+    #                      geom='text', ha="left", va="center") +
+    #          p9.annotate(x=xpos, label=self.strand, y=1.4, color="darkgoldenrod",
+    #                      geom='text', ha="left", va="center", size=30) +
+    #          p9.ylab("") +
+    #          p9.xlab("") +
+    #          p9.theme_minimal() +
+    #          p9.theme(axis_text_y=p9.element_blank(),
+    #                   axis_ticks_major_y=p9.element_blank(),
+    #                   plot_background=p9.element_rect(fill="white", color="white")))
+    #     if save:
+    #         p.save(save)
+    #     else:
+    #         return p
 
 
 
@@ -516,74 +482,6 @@ class Paf:
         return records, skip
 
 
-    @staticmethod
-    def plot_pafdict(paf_dict, out):
-        import plotnine as p9
-        import pandas as pd
-        # grab all mappings in the paf dict
-        paflines = list(paf_dict.values())
-        # first check that all of them are on the same target
-        targets = [p[0].tname for p in paflines]
-        if len(np.unique((targets))) != 1:
-            print("more than one target!")
-            return
-
-        # target range - extent of plotting the reference
-        target_min = np.min([p[0].tstart for p in paflines])
-        target_max = np.max([p[0].tend for p in paflines])
-        # empty dict to hold the posititions
-        frag_lines = {"start": [], "end": [], "ymin": [], "ymax": [], "c": [], "lab": []}
-        # this is for the target
-        frag_lines['start'].append(target_min)
-        frag_lines['end'].append(target_max)
-        frag_lines['ymin'].append(-0.5)
-        frag_lines['ymax'].append(0.5)
-        frag_lines['c'].append(0)
-        frag_lines['lab'].append(targets[0])
-        # add two rectangles for each mapping
-        # one of them for the mapped are
-        # the second for the entire query
-        # (i.e. including unmapped bits on either end)
-        for p_ind in range(len(paflines)):
-            p = paflines[p_ind][0]
-            frag_lines['start'].append(p.tstart)
-            frag_lines['end'].append(p.tend)
-            frag_lines['ymin'].append(p_ind + 1)
-            frag_lines['ymax'].append(p_ind + 2)
-            frag_lines['c'].append(0)
-            frag_lines['lab'].append(p.qname)
-            # query range
-            rstart = p.tstart - p.qstart
-            rend = p.tend + (p.qlen - p.qend)
-            frag_lines['start'].append(rstart)
-            frag_lines['end'].append(rend)
-            frag_lines['ymin'].append(p_ind + 1.25)
-            frag_lines['ymax'].append(p_ind + 1.75)
-            frag_lines['c'].append(1)
-            frag_lines['lab'].append(p.qname)
-
-        # transform to dataframe
-        df = pd.DataFrame(frag_lines)
-        df['c'] = df['c'].astype("category")
-        # construct plot with rectangles
-        # fill is mapped to mapping vs query range
-        # color mapped to sequence name
-        plot = (p9.ggplot() +
-                p9.geom_rect(data=df,
-                             mapping=p9.aes(xmin="start", xmax="end", ymin="ymin", ymax="ymax",
-                                            fill="c", color="lab")) +
-                p9.scale_fill_manual(values=["grey", 'black']) +
-                p9.ylab("") +
-                p9.xlab("") +
-                p9.theme_minimal() +
-                p9.theme(axis_text_y=p9.element_blank(),
-                         axis_ticks_major_y=p9.element_blank(),
-                         legend_position="top", legend_title=p9.element_blank()))
-        plot.save(f"{out}.pdf")
-        return plot
-
-
-
 def format_records(record):
     # Helper function to make fields the right type
     return [conv_type(x, int) for x in record]
@@ -617,7 +515,6 @@ def conv_type(s, func):
         return s
 
 
-
 def choose_best_mapper(records):
     # structured array to decide between ties, by using the score of the DP algorithm
     mapq = [(record.mapq, record.align_score) for record in records]
@@ -626,3 +523,4 @@ def choose_best_mapper(records):
     sorted_qual = np.argsort(mapping_qualities, order=["q", "dp"])
     record = [records[sorted_qual[-1]]]
     return record
+
