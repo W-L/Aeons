@@ -1,42 +1,73 @@
 # AEONS 
 
-## Things to check:
 
-- check connection details: 
-  - device (X1 - X5 ?) -> needs to be set in .params
-  - host (localhost ?), port (9502 ?) -> set in .toml and on readfish commandline
-- basecaller config: "dna_r9.4.1_450bps_fast"  
+## Requirements
 
-
+- Linux
+- conda/mamba/micromamba
+- MinKNOW >=5.0 (with guppy >=6.0 or newer dorado)
 
 
-## Installation:
+## Installation
 
+
+This software runs readfish in the background, therefore first install readfish. This is based on instructions found at [readfish - repo](https://github.com/LooseLab/readfish/tree/main#installation)
+AEONS runs in the same environment after installing a few additional dependencies below.
+
+```shell
+cat <<EOT > readfish-aeons.yml
+name: readfish
+channels:
+  - bioconda
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pip
+  - pip:
+    - readfish[all]
+EOT
 ```
-mamba env create -f aeons_env_synmix.yaml
-conda activate aeons_env
+
+```shell
+# create environment for readfish and AEONS
+mamba env create -f readfish-aeons.yml -y
+mamba activate readfish
+# additional dependencies for AEONS
+mamba install -y gfatools minimap2 bottleneck -c bioconda -c conda-forge -c defaults
+# finally clone this repository
 git clone https://github.com/W-L/Aeons.git
 ```
 
-## Run:
 
-```
-readfish boss-runs --device X1 --experiment-name "synmix" --toml synmix.toml --port 9502 --log-file readfish_synmix.log --chunk-log chunks.tsv --paf-log rf.paf
+## Usage
 
-python /Aeons/aeons_live.py @synmix.params &>aeons_synmix.log
-```
+To configure a sequencing experiment we need 2 separate TOML files: one for AEONS, one for readfish.
+
+AEONS consequently only takes two arguments pointing to those two TOML files:
+
+`python ./aeons.py --toml [aeons.toml] --toml_readfish [readfish.toml]`
+
+For AEONS a template with all default values is included in `/aeons`. Modify/delete this template to configure an experiment.
+For configuration of readfish TOML files, please see: [readfish - repo - toml](https://github.com/LooseLab/readfish/blob/main/docs/toml.md)
 
 
 
+## Walkthrough and testing
 
-### CL for creating conda env 
+...
+
+## Issues, questions, suggestions ...
+
+...
+
+## Citation
+
+...
+
+## License
+
+Licensed under GPLv3
 
 
-```
-conda create -n aeons_env
-conda activate aeons_env
-mamba install python=3.8 numpy==1.17.4 mappy minimap2 gfatools pandas toml pyfastx scipy bottleneck
-pip install ont_fast5_api
 
-conda env export >aeons_env.yaml
-```
