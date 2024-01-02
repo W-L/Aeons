@@ -255,41 +255,6 @@ def random_id(k: int = 20) -> str:
     return x
 
 
-
-def ascii_hist_values(values: NDArray, max_symbols: int = 50) -> str:
-    """
-    Generate an ASCII histogram for the input values.
-    inspired by https://gist.github.com/bgbg/608d9ef4fd75032731651257fe67fc81
-    by Boris Gorelik; License MIT
-
-    :param values: The input values.
-    :param max_symbols: The maximum number of symbols in the histogram.
-    :return: The ASCII histogram as a string.
-    """
-    # output is collected as lines in a list
-    ret = []
-    # cutoffs are the bin borders of the histogram
-    val = np.asarray(values)
-    counts = np.bincount(val)
-    bins = np.arange(np.min(val), np.max(val) + 1)
-    # total number of counts
-    total = sum(counts)
-    # normalise for display
-    norm_counts = counts.astype(float) / counts.sum()
-    # scale such that highest bar has max_symbols
-    max_val = np.max(norm_counts)
-    scaling_factor = max_symbols / max_val
-    scaled_counts = norm_counts * scaling_factor
-    # add a line for each of the bins with their respective counts
-    for binn, original_count, scaled_count in zip(bins, counts, scaled_counts):
-        ret.append(" {:>8.2f} | {:<7,d} | {:s}".format(binn, original_count, "*" * int(scaled_count)))
-    # final lines to make it look nice and report total count
-    ret.append("{:s} | {:s} | {:s}".format('-' * 8, '-' * 7, '-' * 7))
-    ret.append("{:>8s} | {:<7,d}".format('N=', total))
-    return '\n'.join(ret)
-
-
-
 def load_gfa(gfa_path: str) -> Dict[str, str]:
     """
     Load a GFA file and return a dictionary of sequences.
