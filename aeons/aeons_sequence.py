@@ -6,21 +6,20 @@ from copy import deepcopy
 from pathlib import Path
 from shutil import copy
 import time
-from typing import List, Optional, Tuple, Dict, Union, Set, Generator, Any
+from typing import List, Optional, Dict, Union, Set, Any, Tuple
+from concurrent.futures import ThreadPoolExecutor as TPexe
 
 import numpy as np
 from numpy.typing import NDArray
+import bottleneck as bn
 
 from .aeons_paf import PafLine, Paf
-from .aeons_utils import execute, find_exe, write_logs, random_id, find_blocks_generic, load_gfa
-from .aeons_polisher import Polisher
+from .aeons_utils import execute, find_exe, write_logs, random_id, load_gfa
 from .aeons_kmer import euclidean_dist, euclidean_threshold
 from .aeons_mapper import Indexer
-from .aeons_benefit import benefit_bins, calc_fragment_benefit, score_array
 
 
-
-Edge = Tuple[str, str]
+Edge = Tuple[str, str]  # typehint for containments: tuple of (source, target)
 
 
 class Dependencies:
@@ -28,7 +27,7 @@ class Dependencies:
         """
         Initialize the Dependencies class.
 
-        :raises SystemExit: If any of the dependencies is not found in the system path.
+        :raises SystemExit: If any of the dependencies are not found in the system path.
         """
         self.dependencies = ["minimap2", "paf2gfa", "miniasm"]
         self.check_dependencies()
@@ -38,14 +37,13 @@ class Dependencies:
         """
         Check if all dependencies are present in the system path.
 
-        :raises SystemExit: If any of the dependencies is not found in the system path.
+        :raises SystemExit: If any of the dependencies are not found in the system path.
         """
         for dependency in self.dependencies:
             setattr(self, dependency, find_exe(dependency))
             # logging.info(f'{dependency}: {getattr(self, dependency)}')
             if not getattr(self, dependency):
                 sys.exit(f"Dependency {dependency} not found in path")
-
 
 
 
@@ -71,7 +69,6 @@ class SequenceAVA:
         self.dep = Dependencies()
 
 
-
     def load_ava(self, paf: str, seqpool: "SequencePool") -> Tuple[Dict[Edge, PafLine], Set]:
         """
         Load all entries from a PAF file as PafLines and filter the entries while loading.
@@ -92,9 +89,19 @@ class SequenceAVA:
         for rec in records:
             if rec.c == 2:
                 # first contained
+                # check if we have a containment of the two already
+                if (rec.qname, rec.tname) in containments.keys():
+                    if rec.s1 < containments[(rec.qname, rec.tname)].s1:
+                        # previously recorded containment has higher s1
+                        continue
                 containments[(rec.qname, rec.tname)] = rec
             elif rec.c == 3:
                 # second contained
+                # check if we have a containment of the two already
+                if (rec.tname, rec.qname) in containments.keys():
+                    if rec.s1 < containments[(rec.tname, rec.qname)].s1:
+                        # previously recorded containment has higher s1
+                        continue
                 containments[(rec.tname, rec.qname)] = rec
             elif rec.c in {4, 5}:
                 # if applicable, check for tetramer dist
@@ -104,7 +111,15 @@ class SequenceAVA:
                         inter += 1
                         continue
 
-                # append the alignment to both the query and the target
+                if not seqpool.sequences[rec.tname].acceptor:
+                    rec.c = 2
+                    containments[(rec.qname, rec.tname)] = rec
+                    continue
+                if not seqpool.sequences[rec.qname].acceptor:
+                    rec.c = 3
+                    containments[(rec.tname, rec.qname)] = rec
+                    continue
+
                 ovl += 1
                 self.overlaps[(rec.qname, rec.tname)] = rec
                 # check if we have an overlap of the two already
@@ -133,8 +148,6 @@ class SequenceAVA:
         return containments, overlappers
 
 
-
-
     def remove_links(self, sequences: List[str]) -> None:
         """
         Remove overlaps of certain sequences.
@@ -149,17 +162,6 @@ class SequenceAVA:
             # remove overlaps from targets
             for t in targets:
                 self.links[t].pop(sid, None)
-
-
-    def remove_specific_link(self, s1: str, s2: str) -> None:
-        """
-        Remove a specific link from the overlaps.
-
-        :param s1: First sequence header.
-        :param s2: Second sequence header.
-        """
-        self.links[s1].pop(s2, None)
-        self.links[s2].pop(s1, None)
 
 
     def to_be_trimmed(self) -> Dict[str, Tuple[int, int, Any]]:
@@ -179,7 +181,8 @@ class SequenceAVA:
         return to_trim
 
 
-    def trim_success(self, trim_dict: Dict[str, Tuple[int, int, Any]], overlaps: Dict[Tuple[str, str], Any]) -> Set[str]:
+    @staticmethod
+    def trim_success(trim_dict: Dict[str, Tuple[int, int, Any]], overlaps: Dict[Tuple[str, str], Any]) -> Set[str]:
         """
         Check which trimming attempts were successful.
 
@@ -209,22 +212,6 @@ class SequenceAVA:
         return to_remove
 
 
-
-    def check_occupancy(self, avas: Dict[Tuple[str, str], Any], occupied: Set[Tuple[str, str]]) -> Dict[Tuple[str, str], Any]:
-        """
-        Check whether targets of some node are already occupied.
-
-        :param avas: Dictionary of AVA objects.
-        :param occupied: Set of occupied targets.
-        :return: Dictionary of unoccupied targets.
-        """
-        # check whether targets of some node are already occupied
-        not_occ = {(tname, tside): rec for (tname, tside), rec in avas.items()
-                   if (tname, tside) not in occupied}
-        return not_occ
-
-
-
     def links2paf(self, paf_out: str) -> None:
         """
         Write overlaps to a PAF file.
@@ -243,28 +230,6 @@ class SequenceAVA:
                     else:
                         fh.write(rec.line)
                         written.add(rec.line)
-
-
-
-    def paf2gfa_fpa(self, paf_in: str, gfa_out: str) -> bool:
-        """
-        Transform the PAF file to GFA format.
-
-        :param paf_in: Input PAF file path.
-        :param gfa_out: Output GFA file path.
-        :return: True if transformation is successful, False otherwise.
-        """
-        # transform to GFA file for further processing
-        if not os.path.getsize(paf_in):
-            logging.info("no overlaps for merging")
-            return False
-
-        comm = f"fpa -i {paf_in} -o /dev/null gfa -o {gfa_out}"
-        stdout, stderr = execute(comm)
-        if stderr:
-            logging.info(f"stderr: \n {stderr}")
-        return True
-
 
 
     def paf2gfa_gfatools(self, paf: str, fa: str, gfa: Optional[str] = None) -> str:
@@ -385,75 +350,6 @@ class Sequence:
             return False
 
 
-    def polish_sequence(self, read_sources) -> bool:
-        """
-        Polish the sequence using a polisher object.
-
-        :param read_sources: The read sources.
-        :return: True if successful, False otherwise.
-        """
-        success = False
-        # don't polish raw reads, only derived sequences
-        if '*' not in self.header:
-            return success
-        # threshold for polishing, do it only at some timepoint
-        if np.mean(self.cov) < self.next_polish:
-            return success
-        # these are all constituent reads of the contig
-        if not self.atoms:
-            return success
-        if not self.cov.shape[0] > 100000:
-            return success
-        # initiate and run polisher
-        seqpol = Polisher(backbone_header=self.header,
-                          backbone_seq=self.seq,
-                          atoms=self.atoms,
-                          read_sources=read_sources)
-        polished_seq = seqpol.run_polish()
-        success = self.replace_polished_products(polished_seq)
-        return success
-
-
-    def replace_polished_products(self, polished_seq: str) -> bool:
-        """
-        Replace the sequence with a polished sequence.
-
-        :param polished_seq: The polished sequence.
-        :return: True if successful, False otherwise.
-        """
-        # Check the difference in length between old and new
-        orig_len = len(self.seq)
-        new_len = len(polished_seq)
-        len_diff = abs(orig_len - new_len)
-        # don't use new seq if the length changed by a lot
-        if len_diff > orig_len * 0.1:
-            return False
-        # replace the sequence with polished one
-        self.seq = polished_seq
-        # adjust the coverage array to new length
-        orig_cov = np.copy(self.cov)
-        adjusted_arr = orig_cov
-        if orig_len == new_len:
-            pass
-        elif orig_len > new_len:
-            mask = np.ones(orig_len, np.bool)
-            rem_pos = np.random.choice(orig_len, size=len_diff, replace=False)
-            mask[rem_pos] = 0
-            adjusted_arr = orig_cov[mask]
-        elif orig_len < new_len:
-            ins_pos = np.random.randint(low=0, high=orig_len, size=len_diff)
-            ins_val = orig_cov[ins_pos]
-            adjusted_arr = np.insert(arr=orig_cov, obj=ins_pos, values=ins_val)
-        # make sure the new coverage array is the same length as the sequence
-        assert adjusted_arr.shape[0] == len(polished_seq)
-        # replace the coverage array
-        self.cov = adjusted_arr
-        # change the polishing threshold
-        self.last_polish = self.next_polish
-        self.next_polish += self.polish_step
-        return True
-
-
     def chunk_up_coverage(self, n: int):
         """
         Chunk up the coverage array to reduce resolution of strategies.
@@ -474,12 +370,12 @@ class Sequence:
         :param score_vec: The precomputed scoring vector.
         :param n: The node size.
         """
-        sc = score_array(score_vec=score_vec, cov_arr=self.cov_chunked, node_size=n)
+        sc = Benefit.score_array(score_vec=score_vec, cov_arr=self.cov_chunked, node_size=n)
         self.scores = sc
         assert self.cov_chunked.shape[0] == self.scores.shape[0]
 
 
-    def contig_benefits(self, mu: float, ccl: NDArray, node_size: int):
+    def contig_benefits(self, mu: int, ccl: NDArray, node_size: int):
         """
         Calculate benefits for the contig.
 
@@ -487,18 +383,17 @@ class Sequence:
         :param ccl: The ccl value.
         :param node_size: The node size.
         """
-        benefit, smu_sum = calc_fragment_benefit(
+        benefit, smu_sum = Benefit.calc_fragment_benefit(
             scores=self.scores,
             mu=mu,
             approx_ccl=ccl,
             node_size=node_size,
-            e1=self.noi[0],
-            e2=self.noi[-1]
+            e1=bool(self.noi[0]),
+            e2=bool(self.noi[-1])
         )
         self.benefit = benefit
         self.smu_sum = smu_sum
         assert self.cov_chunked.shape[0] == self.benefit.shape[1]
-
 
 
     def set_contig_ends(self, n: int, lim: int = 50):
@@ -528,51 +423,6 @@ class Sequence:
             self.scores[-1] = 1
 
 
-    def find_low_cov(self, n: int, lim: int) -> Tuple[int, int]:
-        """
-        Find low coverage regions in the contig.
-
-        :param n: The node size.
-        :param lim: The coverage limit.
-        :return: The number of original low coverage windows and the number of filtered windows.
-        """
-        # find where the coverage is too low
-        cc = self.cov_chunked
-        dropout_lim = find_dropout_threshold(cc)
-        lc = np.where((cc > dropout_lim * n) & (cc < lim * n))[0]
-        # filter single windows of low coverage
-        # using the difference between adjacent indices of lowcov windows
-        # EXCLUDING blocks of coverage 1
-        lc_diff = np.diff(lc)
-        lc_blocks = find_blocks_generic(lc_diff, 1, 3)
-        lc_filt = set()
-        for start, end in lc_blocks:
-            lc_filt.update(lc[start: end + 1])
-        lc_arr = np.array(list(lc_filt), dtype="int")
-        n_unfilt = lc.shape[0]
-        n_filt = lc_arr.shape[0]
-        # multi-index to set the nois
-        self.noi[lc_arr] = 1
-        return n_unfilt, n_filt
-
-
-    def find_strat(self, ccl: NDArray, n: int) -> NDArray:
-        """
-        Find the strategy for the contig.
-
-        :param ccl: The ccl distribution array.
-        :param n: The node size.
-        :return: Strategy array.
-        """
-        # cover X% of ccl
-        n_steps = int(ccl[-3] / n)
-        # spread the nodes of interest in both directions to get binary arr
-        fwd = roll_boolean_array(arr=self.noi.copy(), steps=n_steps, direction=0)
-        rev = roll_boolean_array(arr=self.noi.copy(), steps=n_steps, direction=1)
-        self.strat = np.column_stack((fwd, rev))
-        return self.strat
-
-
     def find_strat_m0(self, threshold: float) -> NDArray:
         """
         Find the strategy for the contig using benefit threshold.
@@ -582,8 +432,6 @@ class Sequence:
         """
         strat = np.where(self.benefit >= threshold, True, False)
         return strat.transpose()
-
-
 
 
 
@@ -632,9 +480,6 @@ class SequencePool:
         self.dep = Dependencies()
 
 
-
-
-
     def headers(self) -> Set[str]:
         """
         Get the set of sequence headers in the SequencePool.
@@ -678,15 +523,14 @@ class SequencePool:
 
         :param seqs: Dictionary of raw sequences or an existing SequencePool to add.
         """
-        if type(seqs) == dict:
+        if type(seqs) is dict:
             skipped = self._ingest_dict(seqs=seqs)
             logging.info(f"ingested: {len(seqs) - skipped} pool size: {len(self.sequences.keys())}")
-        elif type(seqs) == SequencePool:
+        elif type(seqs) is SequencePool:
             self._ingest_pool(new_pool=seqs)
             logging.info(f"ingested: {len(seqs.sequences)} pool size: {len(self.sequences.keys())}")
         else:
             logging.info("seqs need to be dict, or SequencePool")
-
 
 
     def _ingest_dict(self, seqs: Dict[str, str]) -> int:
@@ -746,8 +590,7 @@ class SequencePool:
         return paf
 
 
-
-    def initial_asm_miniasm(self, c: int = 3, trds: int = 8) -> 'SequencePool':
+    def initial_asm_miniasm(self, c: int = 2, trds: int = 8) -> 'SequencePool':
         """
         Perform initial assembly using miniasm.
 
@@ -774,7 +617,6 @@ class SequencePool:
             if header[-1] == 'c':
                 seqo.acceptor = False
         return contig_pool
-
 
 
     def add2ava(self, new_sequences: 'SequencePool') -> Tuple[str, str]:
@@ -820,8 +662,6 @@ class SequencePool:
             popped += 1
         post = len(self.sequences)
         logging.info(f'Removed: {popped} ({pre} {post})')
-
-
 
 
     def trim_sequences(self, trim_dict: Dict[str, Tuple[int, int, str]]) -> Dict[str, str]:
@@ -872,7 +712,8 @@ class SequencePool:
         return seq_dict
 
 
-    def get_next_increment_edges(self, edges: Set[Edge], previous_edges: Set[Edge] = None) -> Tuple[Set[Edge], Set[Edge]]:
+    @staticmethod
+    def get_next_increment_edges(edges: Set[Edge], previous_edges: Set[Edge] = None) -> Tuple[Set[Edge], Set[Edge]]:
         """
         Get the next increment edges based on the given edges and previous edges.
         if no previous edges are given, get the edges with in-degree of 0: This is the start of the algorithm
@@ -895,7 +736,7 @@ class SequencePool:
         return edges, next_edges
 
 
-    def affect_increment(self, source: str, target: str, rec: PafLine, edge_multiplicity: float) -> None:
+    def effect_increment(self, source: str, target: str, rec: PafLine, edge_multiplicity: float) -> None:
         """
         Effect the increment by adjusting the coverage and adding the source as a constituent of the target.
 
@@ -935,7 +776,7 @@ class SequencePool:
             self.sequences[target].atoms.add(source)
 
 
-    def affect_increments(self, next_edges: Set[Edge], containment: Dict[Edge, PafLine], edge_multiplicity: Dict[str, float] = None) -> None:
+    def effect_increments(self, next_edges: Set[Edge], containment: Dict[Edge, PafLine], edge_multiplicity: Dict[str, float] = None) -> None:
         """
         Effect the increments based on the next set of edges.
 
@@ -951,7 +792,7 @@ class SequencePool:
                 em = 1
             else:
                 em = edge_multiplicity[source]
-            self.affect_increment(source, target, rec, em)
+            self.effect_increment(source, target, rec, em)
 
 
     @staticmethod
@@ -989,7 +830,7 @@ class SequencePool:
         if not next_edges:
             return set()
         edge_multiplicity = self.find_edge_multiplicity(next_edges)
-        self.affect_increments(next_edges, containment, edge_multiplicity)
+        self.effect_increments(next_edges, containment, edge_multiplicity)
         previous_edges = next_edges
 
         while len(edges) > 0:
@@ -998,7 +839,7 @@ class SequencePool:
             if not next_edges:
                 return set()
             edge_multiplicity = self.find_edge_multiplicity(next_edges)
-            self.affect_increments(next_edges, containment, edge_multiplicity)
+            self.effect_increments(next_edges, containment, edge_multiplicity)
 
             # circular containment relationships could trap us here
             if len(next_edges) == len(previous_edges):
@@ -1056,45 +897,16 @@ class SequencePool:
         return contig_pool
 
 
-    def polish_sequences(self, contigs: 'SequencePool', read_sources: Dict[str, str]) -> list:
+    def has_min_one_contig(self, min_contig_len: int) -> bool:
         """
-        Polish the contig sequences using racon and the read source files.
+        Declare contigs based on a minimum contig length. These will be used for strategy generation
 
-        :param contigs: Contig sequences.
-        :param read_sources: Read sources.
-        :return: List of newly polished contigs.
+        :param min_contig_len: Minimum contig length.
+        :return contig: bool
         """
-        polish_count = 0
-        new_polished = []
-        for contig_header, contig in contigs.sequences.items():
-            if not self.time_to_polish(contig):
-                continue
-            success = contig.polish_sequence(read_sources)
-            polish_count += success
-            if success:
-                self.polished[contig_header.split('*')[0]] = contig.last_polish
-                new_polished.append(contig_header)
-        logging.info(f"polished: {polish_count}")
-        return new_polished
-
-
-
-    def time_to_polish(self, contig: Sequence) -> bool:
-        """
-        Check if it's time to polish the contig.
-
-        :param contig: Contig sequence object.
-        :return: True if it's time to polish, False otherwise.
-        """
-        # check if a component of the contig has already been polished
-        components = contig.components
-        c_threshold = contig.next_polish
-        cmp_polish_times = {self.polished.get(c.split('*')[0], None) for c in components}
-        times = {c >= c_threshold for c in cmp_polish_times if c is not None}
-        if any(times):
-            return False
-        else:
-            return True
+        contigs = {header: seqo for header, seqo in self.sequences.items() if len(seqo.seq) > min_contig_len}
+        contig = True if contigs else False
+        return contig
 
 
     def get_atoms(self, headers: List) -> Set[str]:
@@ -1143,41 +955,6 @@ class SequencePool:
 
 
     @staticmethod
-    def parse_gfa(infile: str) -> Generator[Tuple[str, str, Dict[str, str]]]:
-        """
-        Parse a GFA file and yield header, sequence, and tags.
-
-        :param infile: Path to the GFA file.
-        :yields: A tuple containing the header, sequence, and tags.
-        """
-        with open(infile, 'r') as gfa_file:
-            for line in gfa_file:
-                if line.startswith('S'):
-                    ll = line.split('\t')
-                    header = ll[1]
-                    seq = ll[2]
-                    tags = SequencePool._parse_tags('\t'.join(ll[3:]))
-                    yield header, seq, tags
-
-
-    @staticmethod
-    def _parse_tags(tag_string: str) -> Dict[str, str]:
-        """
-        Parse tags from a GFA segment and return a dictionary.
-
-        :param tag_string: String representation of the tags.
-        :return: A dictionary containing the parsed tags.
-        """
-        tags = tag_string.strip().split('\t')
-        tag_dict = dict()
-        for t in tags:
-            tt = t.split(':')
-            tag_dict[tt[0]] = tt[-1]
-        return tag_dict
-
-
-
-    @staticmethod
     def load_unitigs(gfa: str) -> List['Unitig']:
         """
         Load unitigs after graph cleaning with gfatools.
@@ -1210,7 +987,6 @@ class SequencePool:
         return unitigs
 
 
-
     def is_intra(self, seq1: str, seq2: str) -> bool:
         """
         Check if two sequences are classified as intraspecific based on the Euclidean distance of tetramers.
@@ -1229,31 +1005,17 @@ class SequencePool:
 class ContigPool(SequencePool):
 
 
-    def process_contigs(self, node_size: int, lim: int, ccl: NDArray, out_dir: str, batch: int, write: bool = False) -> Dict[str, NDArray]:
-        """
-        WRAPPER to process contigs by chunking them, processing ends and low coverage regions, and finding new strategies.
-
-        :param node_size: The node size.
-        :param lim: The low coverage threshold.
-        :param ccl: Read length distribution
-        :param out_dir: The output directory.
-        :param batch: The batch number.
-        :param write: Whether to write the new strategies. Defaults to False.
-        :return: A dictionary containing the new strategies for contigs.
-        """
-        logging.info("finding new strategies.. ")
-        self._chunk_up_contigs(node_size=node_size)
-        self._process_contig_ends(node_size=node_size)
-        self._process_low_cov_nodes(node_size=node_size, lim=lim)
-        contig_strats = self._find_contig_strategies(node_size=node_size, ccl=ccl)
-        if write:
-            logging.info("writing new strategies")
-            self._write_contig_strategies(out_dir=out_dir, contig_strats=contig_strats)
-            self._write_index_file(out_dir=out_dir, batch=batch)
-        return contig_strats
-
-
-    def process_contigs_m0(self, score_vec: NDArray, node_size: int, ccl: NDArray, out_dir: str, mu: float, lam: float, batch: int, write: bool = False) -> Dict[str, NDArray]:
+    def process_contigs(
+        self,
+        score_vec: NDArray,
+        node_size: int,
+        ccl: NDArray,
+        out_dir: str,
+        mu: int,
+        lam: float,
+        batch: int,
+        write: bool = False
+    ) -> Dict[str, NDArray]:
         """
         WRAPPER to process contigs using m0 strategy.
 
@@ -1267,14 +1029,14 @@ class ContigPool(SequencePool):
         :param write: Whether to write the new strategies. Defaults to False.
         :return: A dictionary containing the new strategies for contigs.
         """
-        logging.info("finding new strategies.. m0")
+        logging.info("finding new strategies..")
         self._chunk_up_contigs(node_size=node_size)
         self._contigs_scores(score_vec=score_vec, node_size=node_size)
         self._process_contig_ends(node_size=node_size)
         self._contigs_benefits(ccl=ccl, mu=mu, node_size=node_size)
         t = self.find_threshold(mu=mu, lam=lam, node_size=node_size)
         # find and write new strategies
-        contig_strats = self._find_contig_strategies(node_size=node_size, ccl=ccl, t=t, m0=True)
+        contig_strats = self._find_contig_strategies(t=t)
         if write:
             logging.info("writing new strategies")
             self._write_contig_strategies(out_dir=out_dir, contig_strats=contig_strats)
@@ -1311,8 +1073,7 @@ class ContigPool(SequencePool):
             seqo.contig_scores(score_vec=score_vec, n=node_size)
 
 
-
-    def _contigs_benefits(self, ccl: NDArray, mu: float, node_size: int) -> None:
+    def _contigs_benefits(self, ccl: NDArray, mu: int, node_size: int) -> None:
         """
         Get the benefit for each contig.
 
@@ -1341,7 +1102,7 @@ class ContigPool(SequencePool):
         rho = 300 // node_size
         tc = (lam - mu - 300) // node_size
 
-        benefit_bin, counts = benefit_bins(benefit)
+        benefit_bin, counts = Benefit.benefit_bins(benefit)
         # average benefit of strategy in the case that all fragments are rejected
         ubar0 = smu_sum
         tbar0 = alpha + rho + (mu // node_size)
@@ -1356,9 +1117,9 @@ class ContigPool(SequencePool):
         # plt.show()
         # calculate threshold exponent and where values are geq
         try:
-            threshold = benefit_bin[strat_size]
+            threshold = float(benefit_bin[strat_size])
         except IndexError:
-            threshold = benefit_bin[-1]
+            threshold = float(benefit_bin[-1])
         return threshold
 
 
@@ -1372,43 +1133,22 @@ class ContigPool(SequencePool):
             seqo.set_contig_ends(n=node_size)
 
 
-    def _process_low_cov_nodes(self, node_size: int, lim: int) -> None:
-        """
-        Find low coverage nodes to target in contigs.
-
-        :param node_size: The node size.
-        :param lim: The low coverage threshold.
-        """
-        unfilt = 0
-        filt = 0
-        for header, seqo in self.sequences.items():
-            n_unfilt, n_filt = seqo.find_low_cov(n=node_size, lim=lim)
-            unfilt += n_unfilt
-            filt += n_filt
-        logging.info(f'low coverage nodes: {unfilt}, after filtering: {filt}')
-
-
-    def _find_contig_strategies(self, node_size: int, ccl: NDArray, t: float = 0.0, m0: bool = False) -> Dict[str, NDArray]:
+    def _find_contig_strategies(self, t: float = 0.0) -> Dict[str, NDArray]:
         """
         Find the strategies for all contigs.
 
-        :param node_size: The node size.
-        :param ccl: Read length distribution
         :param t: The score threshold. Defaults to 0.0.
-        :param m0: Whether to use the m0 strategy
         :return: A dictionary containing the new strategies for contigs.
         """
         contig_strats = {}
         for header, seqo in self.sequences.items():
-            if not m0:
-                cstrat = seqo.find_strat(ccl=ccl, n=node_size)
-            else:
-                cstrat = seqo.find_strat_m0(threshold=t)
+            cstrat = seqo.find_strat_m0(threshold=t)
             contig_strats[header] = cstrat
         return contig_strats
 
 
-    def _write_contig_strategies(self, out_dir: str, contig_strats: Dict[str, NDArray]) -> None:
+    @staticmethod
+    def _write_contig_strategies(out_dir: str, contig_strats: Dict[str, NDArray]) -> None:
         """
         Write the strategies for all contigs to a single file.
 
@@ -1423,7 +1163,6 @@ class ContigPool(SequencePool):
         # place a marker that the strategies were updated
         markerfile = f'{out_dir}/masks/masks.updated'
         Path(markerfile).touch()
-
 
 
     def _write_index_file(self, out_dir: str, batch: int) -> None:
@@ -1807,43 +1546,159 @@ class MultilineContainments:
 
 
 
-def roll_boolean_array(arr: NDArray, steps: int, direction: int) -> NDArray:
-    """
-    Rolls a boolean array in a specified direction, i.e. spread truthy values.
 
-    :param arr: The boolean array to be rolled.
-    :param steps: The number of steps to roll the array.
-    :param direction: The direction in which to roll the array (0 for left, 1 for right).
-    :return: The rolled boolean array.
-    :raises ValueError: If the direction is not 0 or 1.
-    """
-    assert arr.dtype == "bool"
-    # rolling direction is opposite of input
-    if direction == 0:
-        d = -1
-    elif direction == 1:
-        d = 1
-    else:
-        raise ValueError("direction must be in {0, 1}")
-    # roll array to spread truthy values
-    for i in range(steps):
-        arr += np.roll(arr, d)
-    return arr
+class Benefit:
+
+    @staticmethod
+    def init_scoring_vec(lowcov: float) -> NDArray:
+        """
+        Initialize scoring vector based on target coverage.
+
+        :param lowcov: The target coverage value.
+        :return: The scoring vector.
+        """
+        x = np.arange(101)
+        # a = lowcov * 5
+        # score_vec = -gamma.cdf(x, a=a, scale=0.2) + 1
+        score_vec = 1 / (np.exp(x - lowcov) + 1)
+        return score_vec
 
 
+    @staticmethod
+    def score_array(score_vec: NDArray, cov_arr: NDArray, node_size: int) -> NDArray:
+        """
+        Calculate scores based on the scoring vector and coverage array.
 
-def find_dropout_threshold(coverage: NDArray, mod: int = 800) -> int:
-    '''
-    If there are sites that have not had much coverage after some time
-    we don't expect them to gain much after that and want to ignore them
+        :param score_vec: scoring vector.
+        :param cov_arr: coverage array.
+        :param node_size: node size.
+        :return: The calculated scores.
+        """
+        # grab scores using multi-indexing
+        carr = cov_arr // node_size  # apply resolution reduction
+        carr_int = carr.astype("int")
+        scores = score_vec[carr_int]
+        return scores
 
-    :param coverage: coverage depth at each position
-    :param mod: threshold modifier
-    :return threshold: threshold at which to consider as dropout
-    '''
-    cov_mean = np.mean(coverage)
-    # ignore threshold is dependent on mean coverage
-    threshold = int(cov_mean / mod)
-    return threshold
+
+    @staticmethod
+    def calc_fragment_benefit(scores: NDArray, mu: int, node_size: int, approx_ccl: NDArray, e1: bool, e2: bool) -> Tuple[NDArray, float]:
+        """
+        Calculate the benefit of a fragment based on scores, mu, node_size, approx_ccl, e1, and e2.
+
+        :param scores: Fragment's position-wise scores.
+        :param mu: Length of anchor bases.
+        :param node_size: node size.
+        :param approx_ccl: Approx of read length distribution.
+        :param e1: Left-end marker.
+        :param e2: Right-end marker.
+        :return: The calculated benefit and smu_sum.
+        """
+        # expand score to account for contig ends
+        mu_ds = mu // node_size
+        ccl_ds = approx_ccl // node_size
+        ccl_max = int(ccl_ds[-1])
+        sx = Benefit._expand_scores(scores, e1, e2, ccl_max)
+        smu = Benefit._calc_smu_moving(score=sx, mu_ds=mu_ds)
+        benefit = Benefit._calc_benefit_moving(score=sx, ccl_ds=ccl_ds)
+        smu_sum = float(np.sum(smu))
+        b = benefit - smu
+        b[b < 0] = 0
+        b = b[:, ccl_max: -ccl_max]
+        assert b.shape[1] == scores.shape[0]
+        return b, smu_sum
+
+
+    @staticmethod
+    def _expand_scores(scores: NDArray, e1: bool, e2: bool, ccl_max: int) -> NDArray:
+        """
+        Expand scores to account for contig ends.
+
+        :param scores: Fragment scores.
+        :param e1: Left-end marker.
+        :param e2: Right-end marker.
+        :param ccl_max: Max of approx read length dist.
+        :return: The expanded scores.
+        """
+        scoresx = np.zeros(shape=scores.shape[0] + (ccl_max * 2), dtype="float64")
+        scoresx[ccl_max: -ccl_max] = scores
+        scoresx[0: ccl_max] = 1 if e1 else 0
+        scoresx[-ccl_max: -1] = 1 if e2 else 0
+        return scoresx
+
+
+    @staticmethod
+    def _calc_smu_moving(score: NDArray, mu_ds: int) -> NDArray:
+        """
+        Calculate smu moving based on score and down-sampled mu.
+
+        :param score: The score.
+        :param mu_ds: The mu_ds.
+        :return: The calculated smu.
+        """
+        smu_fwd = bn.move_sum(score, window=mu_ds, min_count=1)
+        smu_rev = bn.move_sum(score[::-1], window=mu_ds, min_count=1)
+        smu = np.stack((smu_fwd, smu_rev))
+        return smu
+
+
+    @staticmethod
+    def _calc_benefit_moving(score: NDArray, ccl_ds: NDArray) -> NDArray:
+        """
+        Calculate benefit moving based on score and ccl_ds.
+
+        :param score: Fragment scores.
+        :param ccl_ds: Down-sampled read length dist array.
+        :return: The calculated benefit.
+        """
+        score_rev = score[::-1]
+        benefit = np.zeros(shape=(2, score.shape[0]), dtype="float64")
+        perc = np.arange(0.1, 1.1, 0.1)[::-1]
+        assert perc.shape == ccl_ds.shape
+        for i in range(ccl_ds.shape[0]):
+            ben_fwd = bn.move_sum(score, window=int(ccl_ds[i]), min_count=1)[ccl_ds[i]: -1]
+            ben_rev = bn.move_sum(score_rev, window=int(ccl_ds[i]), min_count=1)[ccl_ds[i]: -1]
+            benefit[0, 0: -ccl_ds[i] - 1] += ben_fwd * perc[i]
+            benefit[1, ccl_ds[i]: -1] += ben_rev[::-1] * perc[i]
+        return benefit
+
+
+    @staticmethod
+    def benefit_bins(benefit: NDArray) -> Tuple[NDArray, NDArray]:
+        """
+        Group benefit into bins of similar values using binary exponent. Used to find acceptance threshold
+
+        :param benefit: positional benefit array.
+        :return: The benefit bins and counts.
+        """
+        benefit_nz_ind = np.nonzero(benefit)
+        benefit_flat_nz = benefit[benefit_nz_ind]
+        # to make binary exponents work, normalise benefit values
+        normaliser = np.max(benefit_flat_nz)
+        benefit_flat_norm = benefit_flat_nz / normaliser
+        mantissa, benefit_exponents = np.frexp(benefit_flat_norm)
+        # count how often each exponent is present
+        # absolute value because counting positive integers is quicker
+        benefit_exponents_pos = np.abs(benefit_exponents)
+        # multi-thread counting of exponents
+        exponent_arrays = np.array_split(benefit_exponents_pos, 12)
+        with TPexe(max_workers=12) as executor:
+            exponent_counts = executor.map(np.bincount, exponent_arrays)
+        exponent_counts = list(exponent_counts)
+        # aggregate results from threads
+        # target array needs to have the largest shape of the thread results
+        max_exp = np.max([e.shape[0] for e in exponent_counts])
+        bincounts = np.zeros(shape=max_exp, dtype='int')
+        # sum up results from individual threads
+        for exp in exponent_counts:
+            bincounts[0:exp.shape[0]] += exp
+        # filter empty bins
+        exponents_unique = np.nonzero(bincounts)[0]
+        # counts of the existing benefit exponents
+        counts = bincounts[exponents_unique]
+        # use exponents to rebuild benefit values
+        benefit_bin = np.power(2.0, -exponents_unique) * normaliser
+        return benefit_bin, counts
+
 
 
