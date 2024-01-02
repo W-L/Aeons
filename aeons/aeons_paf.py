@@ -1,5 +1,7 @@
+import argparse
 from io import StringIO
 from collections import defaultdict
+from typing import Tuple, Dict, List
 
 import numpy as np
 
@@ -11,9 +13,14 @@ class PafLine:
     parse a single alignment from a PAF into a flexible container
     '''
 
-    def __init__(self, line, tags=True):
+    def __init__(self, line: str, tags: bool = True):
+        """
+        Parse a line from a PAF file
+
+        :param line: string representation of a line in a PAF file
+        :param tags: boolean indicator whether to parse tags
+        """
         self.line = line
-        # parsing into shape
         fields = ['qname', 'qlen', 'qstart', 'qend',
                   'strand', 'tname', 'tlen', 'tstart', 'tend',
                   'num_matches', 'alignment_block_length',
@@ -48,7 +55,13 @@ class PafLine:
         self.min_length_pair = None
 
 
-    def filter(self, filters):
+    def filter(self, filters: argparse.Namespace) -> bool:
+        """
+        Check if an alignment needs to be filtered out
+
+        :param filters: Filters stored as arguments
+        :return: Indicator whether line is filtered
+        """
         # like classify, pack all conditions in here
         if self._self_aligned():
             return True
@@ -60,15 +73,24 @@ class PafLine:
             return True
 
 
-    def min_length_in_pair(self):
+    def min_length_in_pair(self) -> float:
+        """
+        Get the shorter length of the two aligned sequences
+
+        :return: Length of shorter sequence in pair
+        """
         if not self.min_length_pair:
             self.min_length_pair = min(self.qlen, self.tlen)
         return self.min_length_pair
 
 
-    def overhang(self):
-        # sum of the smallest overhangs on both sequences
-        # used in classification of mapping
+    def overhang(self) -> float:
+        """
+        Get the sum of the smallest overhangs on both sequences
+        Used in classification of mapping
+
+        :return: Sequence overhang in alignment
+        """
         if not self.rev:
             overhang = min(self.qstart, self.tstart) +\
                        min(self.qlen - self.qend, self.tlen - self.tend)
@@ -78,15 +100,24 @@ class PafLine:
         return overhang
 
 
-    def map_length(self):
+    def map_length(self) -> float:
+        """
+        Get the shorter alignment length. I.e. either the span on query or target
+
+        :return: Mapping length of the paf record
+        """
         if not self.maplen:
             self.maplen = min(self.qend - self.qstart, self.tend - self.tstart)
         return self.maplen
 
 
-    def classify(self):
-        # classify the alignment according to miniasm alg 5
-        # these are already filtered
+    def classify(self) -> int:
+        """
+        Classify the alignment according to miniasm algorithm 5
+        Records that are being classified have already been filtered
+
+        :return: Indicator of alignment type
+        """
         c = -1
 
         if self._internal_match():
@@ -123,14 +154,26 @@ class PafLine:
         return c
 
 
-    def _internal_match(self):
+    def _internal_match(self) -> bool:
+        """
+        Check if the alignment is an internal match.
+        We consider a maximum of 15 percent of the map length as limit
+
+        :return: indicator if internal match
+        """
         if self.overhang() > (self.map_length() * 0.15):
             return True
         else:
             return False
 
 
-    def _first_contained(self):
+    def _first_contained(self) -> bool:
+        """
+        First contained means the query is contained in the target.
+        This can be different in either forward or reverse relative orientation
+
+        :return: indicator for query contained in target
+        """
         # FORWARD
         if not self.rev:
             if (self.qstart <= self.tstart) and ((self.qlen - self.qend) < (self.tlen - self.tend)):
@@ -145,7 +188,13 @@ class PafLine:
                 return False
 
 
-    def _second_contained(self):
+    def _second_contained(self) -> bool:
+        """
+        Second contained means the target is contained in the query.
+        This can be different in either forward or reverse relative orientation
+
+        :return: indicator for target contained in query
+        """
         # FORWARD
         if not self.rev:
             if (self.qstart >= self.tstart) and ((self.qlen - self.qend) > (self.tlen - self.tend)):
@@ -160,7 +209,13 @@ class PafLine:
                 return False
 
 
-    def _first_contained_fallback(self):
+    def _first_contained_fallback(self) -> bool:
+        """
+        Handling edge cases of containment: if more than 90 percent of the sequence
+        is covered my a mapping, then we assume contained
+
+        :return: Indicator for query contained in target
+        """
         qcov = self.qend - self.qstart
         if (qcov / self.qlen) >= 0.90:
             return True
@@ -168,7 +223,13 @@ class PafLine:
             return False
 
 
-    def _second_contained_fallback(self):
+    def _second_contained_fallback(self) -> bool:
+        """
+        Handling edge cases of containment: if more than 90 percent of the sequence
+        is covered my a mapping, then we assume contained
+
+        :return: Indicator for target contained in query
+        """
         tcov = self.tend - self.tstart
         if (tcov / self.tlen) >= 0.90:
             return True
@@ -176,14 +237,27 @@ class PafLine:
             return False
 
 
-    def _first_contained_mostly(self):
+    def _first_contained_mostly(self) -> bool:
+        """
+        This is to consider internal matches of long sequences as containments instead.
+        This is done so that we can count the coverage information of such events
+
+        :return: indicator for mostly-contained internal matches
+        """
         qcov = self.qend - self.qstart
         if (qcov / self.qlen) >= 0.50 and self.qlen > 20000:
             return True
         else:
             return False
 
-    def _second_contained_mostly(self):
+
+    def _second_contained_mostly(self) -> bool:
+        """
+        This is to consider internal matches of long sequences as containments instead.
+        This is done so that we can count the coverage information of such events
+
+        :return: indicator for mostly-contained internal matches
+        """
         tcov = self.tend - self.tstart
         if (tcov / self.tlen) >= 0.50 and self.qlen > 20000:
             return True
@@ -191,7 +265,12 @@ class PafLine:
             return False
 
 
-    def _overlap_orientation(self):
+    def _overlap_orientation(self) -> Tuple[int, str, str]:
+        """
+        Identify details of overlaps, i.e. which overlaps which and on which end
+
+        :return: Indicator for overlap source and their respective ends
+        """
         if not self.rev:
             if self.qstart > self.tstart:
                 # 'A' overlaps 'B'
@@ -220,14 +299,25 @@ class PafLine:
             return 5, 'L', 'L'
 
 
-    def _self_aligned(self):
+    def _self_aligned(self) -> bool:
+        """
+        Check if query is also target
+
+        :return: Indicator if alignment to itself
+        """
         if self.qname == self.tname:
             return True
         else:
             return False
 
 
-    def _is_merged(self):
+    def _is_merged(self) -> bool:
+        """
+        Check for internal match turned OVL restrictions
+        This might be deprecated
+
+        :return: Indicator for already merged seqs
+        """
         if '*' in self.qname and '*' in self.tname:
             return True
         else:
@@ -235,11 +325,19 @@ class PafLine:
 
 
     @staticmethod
-    def _is_prox(start, end, length, lim=1000.0):
-        # check if a record has a mapped region close to one of its ends
-        # masm definition would be lim = 1000
-        # a fixed basepair limit does not work for us, we need to trim off more
-        # i.e. if limit is given as percentage, calc a limit
+    def _is_prox(start, end, length, lim=1000.0) -> bool:
+        """
+        check if a record has a mapped region close to one of its ends
+        masm definition would be lim = 1000
+        a fixed basepair limit does not work for us, we need to trim off more
+        i.e. if limit is given as percentage, calc a limit
+
+        :param start: start position on seq
+        :param end: end position on seq
+        :param length: sequence length
+        :param lim: limit of allowed overhang
+        :return: indicator whether mapping in proximity to sequence end
+        """
         if lim < 1:
             limit = lim * length
         else:
@@ -249,21 +347,29 @@ class PafLine:
         return ovl
 
 
-    def _im_ovl_restrictions(self, min_seqlen=15000, min_maplen=5000):
-        # check some other restrictions to count internal match as OVL
+    def _im_ovl_restrictions(self) -> bool:
+        """
+        check additional restrictions to count internal match as OVL
+
+        :return: indicator for internal match to be overlap
+        """
+
         maplen = self.map_length()
-        if self.qlen > min_seqlen:
-            if self.tlen > min_seqlen:
-                if maplen > min_maplen:
+        if self.qlen > 15000:
+            if self.tlen > 15000:
+                if maplen > 5000:
                     if self._is_merged():
                         return True
         return False
 
 
-    def internal_match_is_overlap(self):
-        # due to overlapping untrimmed reads,
-        # we reconsider internal matches that might be overlaps
-        # if one record has a true dovetail, check if the other has a relaxed dovetail
+    def internal_match_is_overlap(self) -> bool:
+        """
+        due to overlapping untrimmed reads, we reconsider internal matches that might be overlaps
+        if one record has a true dovetail, check if the other has a relaxed dovetail
+
+        :return: indicator for internal match to be overlap instead
+        """
         lim = 0.15
         if self._is_prox(start=self.qstart, end=self.qend, length=self.qlen):
             self.qprox = True  # mark which side the true prox is for trimming
@@ -286,7 +392,15 @@ class PafLine:
 
 
     @staticmethod
-    def _find_coords(start, end, length):
+    def _find_coords(start: int, end: int, length: int) -> Tuple[int, int]:
+        """
+        find coordinates to trim off of reads
+
+        :param start: start of mapping on sequence to be trimmed
+        :param end: end of mapping on sequence to be trimmed
+        :param length: length of sequence to be trimmed
+        :return: start and end coords to trim
+        """
         # which side is closer to the end?
         min_overhang_idx = np.argmin([start, length - end])
         if min_overhang_idx == 0:
@@ -298,10 +412,13 @@ class PafLine:
         return trim_start, trim_stop
 
 
-    def find_trim_coords(self):
-        # if this alignment has been identified to be useful when trimmed
-        # find which of the sequences we want to trim
-        # and which coordinates
+    def find_trim_coords(self) -> Tuple[str, int, int, str]:
+        """
+        if this alignment has been identified to be useful when trimmed,
+        find which of the sequences we want to trim and which coordinates
+
+        :return: Tuple of sequence name, start, end, and partner sequence
+        """
         if self.qprox:
             # if q is a real prox, trim t
             sid = self.tname
@@ -326,13 +443,17 @@ class PafLine:
         # plus the length of the newly added sequence, minus the overlap length
         new_len = orig_len - trimmed_bit + other_len - self.alignment_block_length
         if new_len < orig_len:
-            sid = 0
+            sid = '0'
 
         return sid, trim_start, trim_stop, other
 
 
-    def grab_increment_coords(self):
-        # grab the coordinates of containment
+    def grab_increment_coords(self) -> Tuple[int, int, int, int, int, int]:
+        """
+        get the coordinates of a containment to increment the coverage counts
+
+        :return: Tuple of coordinates to increment
+        """
         if self.c == 2:
             ostart = self.tstart
             oend = self.tend
@@ -344,15 +465,19 @@ class PafLine:
             cstart = self.tstart
             cend = self.tend
         else:
-            print("this method should only be called on contained reads")
-            return
+            raise ValueError("This method should only be called on contained reads")
 
         olen = oend - ostart
         clen = cend - cstart
         return ostart, oend, olen, cstart, cend, clen
 
 
-    def keygen(self):
+    def keygen(self) -> str:
+        """
+        New alphabetically sorted header for multiline containments
+
+        :return: New header
+        """
         if self.qname < self.tname:
             return f'{self.qname}-{self.tname}'
         else:
@@ -427,7 +552,14 @@ class Paf:
 
 
     @staticmethod
-    def parse_PAF(paf_file, min_len):
+    def parse_PAF(paf_file: str | StringIO, min_len: int) -> Dict:
+        """
+        Parse the contents of a PAF file into a dictionary of records
+
+        :param paf_file: Can be either a string or a StringIO object
+        :param min_len: minimum alignment length to consider an entry
+        :return: Dict of parsed PAF file
+        """
         if isinstance(paf_file, str):
             with open(paf_file, 'r') as paff:
                 paf_dict = Paf._parse_content(fh=paff, min_len=min_len)
@@ -440,7 +572,14 @@ class Paf:
 
 
     @staticmethod
-    def _parse_content(fh, min_len):
+    def _parse_content(fh, min_len: int) -> Dict:
+        """
+        Parser for PAF files into defaultdicts
+
+        :param fh: Filehandle of PAF
+        :param min_len: minimum alignment block length
+        :return: parsed dict with PAF entries
+        """
         paf_dict = defaultdict(list)
 
         for record in fh:
@@ -456,9 +595,15 @@ class Paf:
 
 
     @staticmethod
-    def parse_filter_classify_records(paf, filters):
-        # parse a paf file by converting each line to Paf object
-        # filtering and classifying mappings
+    def parse_filter_classify_records(paf: str, filters: argparse.Namespace) -> Tuple[List, List]:
+        """
+        Parse a paf file by converting each line to Paf object,
+        while also filtering and classifying mappings
+
+        :param paf: String of PAF file name
+        :param filters: Filters stored as Namespace
+        :return: Lists of classified and skipped PAF records
+        """
         records = []
         skip = []
         with open(paf, 'r') as fh:
@@ -467,7 +612,6 @@ class Paf:
                 # check if this mapping passes the filters
                 is_filtered = rec.filter(filters=filters)
                 if is_filtered:
-                    # skip += 1
                     continue
 
                 # classify the alignment
@@ -482,23 +626,22 @@ class Paf:
         return records, skip
 
 
-def format_records(record):
-    # Helper function to make fields the right type
+def format_records(record: List) -> List:
+    """
+    Helper function to make fields of a PafLine the right type
+
+    :param record: Split string of PAFline into list
+    :return: Same list but with types converted to int
+    """
     return [conv_type(x, int) for x in record]
 
 
-def parse_tags(tags):
-    """Convert a list of SAM style tags, from a PAF file, to a dict
+def parse_tags(tags: List) -> Dict:
+    """
+    Parse tags of a PAFline into a dictionary
 
-    Parameters
-    ----------
-    tags : list
-        A list of SAM style tags
-
-    Returns
-    -------
-    dict
-        Returns dict of SAM style tags
+    :param tags: List of SAM style tags
+    :return: Dict of SAM style tags
     """
     c = {"i": int, "A": str, "f": float, "Z": str}
     return {
@@ -507,16 +650,27 @@ def parse_tags(tags):
     }
 
 
-def conv_type(s, func):
-    # Generic converter, to change strings to other types
+def conv_type(s: str, func):
+    """
+    Generic converter, to change strings to other types
+
+    :param s: Input string to convert to a different type
+    :param func: Target type of input string
+    :return: Either converted or original type
+    """
     try:
         return func(s)
     except ValueError:
         return s
 
 
-def choose_best_mapper(records):
-    # structured array to decide between ties, by using the score of the DP algorithm
+def choose_best_mapper(records: List) -> List:
+    """
+    Structured array to decide between ties, by using the score of the DP algorithm
+
+    :param records: List of multiple mappers to decide from
+    :return: Best mapper according to attributes
+    """
     mapq = [(record.mapq, record.align_score) for record in records]
     custom_dtypes = [('q', int), ('dp', int)]
     mapping_qualities = np.array(mapq, dtype=custom_dtypes)
