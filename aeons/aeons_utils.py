@@ -3,7 +3,7 @@ from shutil import which
 from sys import executable
 from itertools import groupby
 from argparse import Namespace
-from typing import Tuple, Callable, TextIO, Dict
+from typing import Tuple, TextIO, Dict
 
 import numpy as np
 from numpy.typing import NDArray
@@ -87,21 +87,6 @@ def find_exe(name: str):
 
 
 
-def conv_type(s: str, func: Callable) -> str:
-    """
-    Generic converter, to change strings to other types.
-
-    :param s: The string to convert.
-    :param func: The conversion function.
-    :return: The converted value or the original string if conversion fails.
-    """
-    try:
-        return func(s)
-    except ValueError:
-        return s
-
-
-
 def readfq(fp: TextIO):
     """
     Read a fastq file and yield the entries.
@@ -177,21 +162,6 @@ def read_fa(fh: TextIO):
         # join all sequence lines to one
         seq = "".join(s.strip() for s in faiter.__next__())
         yield headerStr, seq
-
-
-
-def simple_read_fa(fa: str) -> Dict[str, str]:
-    """
-    Read sequences from a fasta file and return a dictionary.
-
-    :param fa: The path to the fasta file.
-    :return: A dictionary mapping headers to sequences.
-    """
-    read_sequences = {}
-    with open(fa, 'r') as fa_file:
-        for header, seq in read_fa(fa_file):
-            read_sequences[header] = seq
-    return read_sequences
 
 
 
@@ -286,20 +256,6 @@ def random_id(k: int = 20) -> str:
 
 
 
-def window_sum(arr: NDArray, w: int) -> float:
-    """
-    Calculate the sums of non-overlapping windows in the array.
-
-    :param arr: The input array.
-    :param w: The window size.
-    :return: The sums of the windows.
-    """
-    # sums of non-overlapping windows
-    sumw = float(np.sum(arr[: (len(arr) // w) * w].reshape(-1, w), axis=1))
-    return sumw
-
-
-
 def ascii_hist_values(values: NDArray, max_symbols: int = 50) -> str:
     """
     Generate an ASCII histogram for the input values.
@@ -351,8 +307,8 @@ def load_gfa(gfa_path: str) -> Dict[str, str]:
                     yield header, seq
 
     sequences = {}
-    for header, seq in _load_gfa(gfa_path):
-        sequences[header] = seq
+    for hd, sq in _load_gfa(gfa_path):
+        sequences[hd] = sq
     return sequences
 
 
