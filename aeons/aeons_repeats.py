@@ -177,12 +177,12 @@ class RepeatFilter:
 
 
 
-    def filter_batch(self, seq_dict: Dict) -> set:
+    def filter_batch(self, seq_dict: Dict) -> Dict:
         """
         Check a dict of input sequences against a repeat library
 
         :param seq_dict: Dict of input sequences
-        :return: Set of sequences with potential repeats at the end
+        :return: Dict of sequences with potential repeat-seqs removed
         """
         logging.info("repeat filtering batch of reads")
         # write batch to file
@@ -197,7 +197,8 @@ class RepeatFilter:
         mappings = lm.mappy_batch(self.repeats)
         rep_cov = self._count_cov(mappings)
         danger_ids = self._check_coverage(rep_cov)
-        return danger_ids
+        filtered_seqs = {h: s for h, s in seq_dict.items() if h not in danger_ids}
+        return filtered_seqs
 
 
 
