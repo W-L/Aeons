@@ -364,7 +364,7 @@ class Sequence:
         self.benefit = np.zeros(shape=self.cov_chunked.shape[0], dtype="float")
 
 
-    def contig_scores(self, score_vec: NDArray, n: int):
+    def contig_scores(self, score_vec: NDArray, n: int = 100):
         """
         Calculate scores for the contig.
 
@@ -376,7 +376,7 @@ class Sequence:
         assert self.cov_chunked.shape[0] == self.scores.shape[0]
 
 
-    def contig_benefits(self, mu: int, ccl: NDArray, node_size: int):
+    def contig_benefits(self, mu: int, ccl: NDArray, node_size: int = 100):
         """
         Calculate benefits for the contig.
 
@@ -1009,12 +1009,12 @@ class ContigPool(SequencePool):
     def process_contigs(
         self,
         score_vec: NDArray,
-        node_size: int,
         ccl: NDArray,
         out_dir: str,
         mu: int,
         lam: float,
         batch: int,
+        node_size: int = 100,
         write: bool = False
     ) -> Dict[str, NDArray]:
         """
@@ -1045,7 +1045,7 @@ class ContigPool(SequencePool):
         return contig_strats
 
 
-    def _chunk_up_contigs(self, node_size: int) -> None:
+    def _chunk_up_contigs(self, node_size: int = 100) -> None:
         """
         Chunk up collection of contigs by giving them a chunked representation to reduce resolution
 
@@ -1063,7 +1063,7 @@ class ContigPool(SequencePool):
         logging.info(f'longest components: {lengths_sort[:10]}')
 
 
-    def _contigs_scores(self, score_vec: NDArray, node_size: int) -> None:
+    def _contigs_scores(self, score_vec: NDArray, node_size: int = 100) -> None:
         """
         Get the scores for each contig.
 
@@ -1074,7 +1074,7 @@ class ContigPool(SequencePool):
             seqo.contig_scores(score_vec=score_vec, n=node_size)
 
 
-    def _contigs_benefits(self, ccl: NDArray, mu: int, node_size: int) -> None:
+    def _contigs_benefits(self, ccl: NDArray, mu: int, node_size: int = 100) -> None:
         """
         Get the benefit for each contig.
 
@@ -1086,7 +1086,7 @@ class ContigPool(SequencePool):
             seqo.contig_benefits(mu=mu, ccl=ccl, node_size=node_size)
 
 
-    def find_threshold(self, mu: float, lam: float, node_size: int) -> float:
+    def find_threshold(self, mu: float, lam: float, node_size: int = 100) -> float:
         """
         Find the acceptance threshold based on all benefit values.
 
@@ -1124,7 +1124,7 @@ class ContigPool(SequencePool):
         return threshold
 
 
-    def _process_contig_ends(self, node_size: int) -> None:
+    def _process_contig_ends(self, node_size: int = 100) -> None:
         """
         Set contig ends to reflect their status during calculation of the strategy.
 
@@ -1566,7 +1566,7 @@ class Benefit:
 
 
     @staticmethod
-    def score_array(score_vec: NDArray, cov_arr: NDArray, node_size: int) -> NDArray:
+    def score_array(score_vec: NDArray, cov_arr: NDArray, node_size: int = 100) -> NDArray:
         """
         Calculate scores based on the scoring vector and coverage array.
 
@@ -1583,7 +1583,14 @@ class Benefit:
 
 
     @staticmethod
-    def calc_fragment_benefit(scores: NDArray, mu: int, node_size: int, approx_ccl: NDArray, e1: bool, e2: bool) -> Tuple[NDArray, float]:
+    def calc_fragment_benefit(
+        scores: NDArray,
+        mu: int,
+        approx_ccl: NDArray,
+        e1: bool,
+        e2: bool,
+        node_size: int = 100,
+    ) -> Tuple[NDArray, float]:
         """
         Calculate the benefit of a fragment based on scores, mu, node_size, approx_ccl, e1, and e2.
 
