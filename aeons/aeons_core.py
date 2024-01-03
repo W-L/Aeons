@@ -59,7 +59,7 @@ class AeonsRun:
             self.first_live_asm()
         else:
             raise ValueError("Neither sim nor live run")
-
+        logging.info("Finished initial setup")
 
 
 
@@ -107,16 +107,15 @@ class AeonsRun:
             self.repeat_filter = RepeatFilter(name=self.args.name, seqpool=init_pool)
 
         # run first asm
+        logging.info("Running assembly of initial data..")
         init_contigs = init_pool.initial_asm_miniasm()
         self.pool.ingest(init_contigs)
         has_contig = self.pool.has_min_one_contig(min_contig_len=self.args.min_contig_len)
         ncontigs = len(self.pool.sequences)
         logging.info(f'initial contigs: {ncontigs}')
-
         if len(self.pool.sequences) == 0 or not has_contig:
             print("no contigs of sufficient length, need more data")
             sys.exit()  # hard exit from simulation
-
         self.pool.write_seq_dict(seq_dict=self.pool.seqdict(), file=self.pool.contig_fa)
 
 
@@ -131,12 +130,17 @@ class AeonsRun:
         if not Path("readfish.toml").exists():
             raise FileNotFoundError("readfish.toml does not exist. Something went wrong loading configs")
         # launch readfish into the background
-        script_path = Path(sys.argv[0]).parent / "aeons_readfish.py"
+        import inspect
+        module_path = inspect.getfile(AeonsRun)
+        logging.info(module_path)
+        script_path = Path(module_path).parent / "aeons_readfish.py"
         if not script_path.is_file():
             raise FileNotFoundError("aeons_readfish.py not found. Something went wrong..")
-        spawn(f'python {script_path} {self.args.device} {self.args.name}')
-        time.sleep(10)  # TODO check if enough
-
+        readfish_comm = f'python {script_path} {self.args.device} {self.args.name}'
+        logging.info("Launching readfish")
+        logging.info(readfish_comm)
+        spawn(readfish_comm)
+        # time.sleep(10)  # TODO check if enough
 
 
     def init_live(self) -> None:
@@ -168,7 +172,7 @@ class AeonsRun:
     def first_live_asm(self) -> None:
         """
         Construct a first assembly from some initial data.
-        Scan directory for data and wait until args.cov_wait megabases accumulate
+        Scan directory for data and wait until args.data_wait megabases accumulate
         Loop until some contigs have been generated
 
         :return:
@@ -179,7 +183,7 @@ class AeonsRun:
             new_fastq = LiveRun.scan_dir(fq=self.args.fq, processed_files=set())
             fq_batch = FastqBatch(fq_files=new_fastq, channels=self.channels)
             logging.info(f"sequenced bases so far: {fq_batch.total_bases}")
-            if fq_batch.total_bases / 1e6 < self.args.cov_wait:
+            if fq_batch.total_bases / 1e6 < self.args.data_wait:
                 continue
             else:
                 # try first asm
@@ -264,7 +268,13 @@ class AeonsRun:
 
 
 
-    def make_decision_paf(self, paf_out: str, read_sequences: Dict, strat: NDArray | int) -> Dict:
+    def make_decision_paf(
+        self,
+        paf_out: str,
+        read_sequences: Dict,
+        strat: NDArray | int,
+        node_size: int = 100
+    ) -> Dict:
         """
         Decision function for simulations only.
         In real experiments readfish performs this functionality
@@ -272,6 +282,7 @@ class AeonsRun:
         :param paf_out: String output of mapping reads to contigs
         :param read_sequences: Dictionary of new read sequences
         :param strat: Mask array for look-ups.
+        :param node_size: Resolution reduction factor of sequencing masks
         :return: Dict of read sequences after decisions, i.e. rejected reads are truncated
         """
         # transform paf output to dictionary
@@ -311,7 +322,7 @@ class AeonsRun:
 
             # index into strategy to find the decision
             try:
-                decision = strat[str(rec.tname)][rec.c_start // self.args.node_size][rec.rev]
+                decision = strat[str(rec.tname)][rec.c_start // node_size][rec.rev]
             except TypeError:
                 # if we don't have a strategy yet, it's an integer so except this and accept all
                 decision = 1
@@ -545,7 +556,6 @@ class AeonsRun:
         # update the sequencing masks
         self.strat = contig_pool.process_contigs(
             score_vec=self.score_vec,
-            node_size=self.args.node_size,
             ccl=self.rl_dist.approx_ccl,
             out_dir=self.out_dir,
             mu=self.args.mu,
@@ -620,9 +630,12 @@ class LiveRun:
         except:
             logging.info("Minknow's output dir could not be inferred from device name. Exiting.")
             logging.info(f'\n{device}\n{host}\n{port}')
-            # out_path = ""  # dummy
-            # out_path = "/home/lukas/Desktop/BossRuns/playback_target/data/pb01/no_sample/20211021_2209_MS00000_f1_f320fce2"
-            exit()
+            if device == "TESTING":
+                out_path = "."
+                if not os.path.exists(f'{out_path}/fastq_pass'):
+                    os.mkdir(f'{out_path}/fastq_pass')
+            else:
+                exit()
         return out_path
 
 
@@ -752,30 +765,35 @@ class SimRun:
             source=self.args.fq,
             batchsize=self.args.bsize,
             maxbatch=self.args.maxb,
-            seed=self.args.seed
         )
         # self.stream = FastqStream(
         #   source=self.args.fq,
-        #   bsize=self.args.bsize,
-        #   seed=self.args.seed,
-        #   workers=self.args.workers
+        #   bsize=self.args.bsize
         # )
 
 
 
-    def update_times(self, read_sequences: Dict[str, str], reads_decision: Dict[str, str]) -> None:
+    def update_times(
+        self,
+        read_sequences: Dict[str, str],
+        reads_decision: Dict[str, str],
+        alpha: int = 200,
+        rho: int = 300,
+    ) -> None:
         """
         Increment pseudotime for control and aeons regions
         on a flowcell during simulations
 
         :param read_sequences: Dict of raw sequences, accepting everything
         :param reads_decision: Dict of processed sequences after decisions
+        :param alpha: acquisition time constant
+        :param rho: rejection time
         :return:
         """
         # for control: all reads as they come out of the sequencer
         # total bases + (#reads * alpha)
         bases_total = np.sum([len(seq) for seq in read_sequences.values()])
-        acquisition = self.args.bsize * self.args.alpha
+        acquisition = self.args.bsize * alpha
         self.time_control += (bases_total + acquisition)
         logging.info(f"time control: {self.time_control}")
 
@@ -783,7 +801,7 @@ class SimRun:
         read_lengths_decision = np.array([len(seq) for seq in reads_decision.values()])
         n_reject = np.sum(np.where(read_lengths_decision == self.args.mu, 1, 0))
         bases_aeons = np.sum(read_lengths_decision)
-        rejection_cost = n_reject * self.args.rho
+        rejection_cost = n_reject * rho
         self.time_aeons += (bases_aeons + acquisition + rejection_cost)
         logging.info(f"time aeons: {self.time_aeons}")
 
