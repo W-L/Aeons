@@ -497,6 +497,7 @@ parser, args = main(argv=[
     '--device', device,
     '--experiment-name', name,
     '--toml', 'readfish.toml',
+    '--log-file', 'readfish.log'
     # '--host', host,
     # '--port', port,
 ])
