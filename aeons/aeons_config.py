@@ -2,12 +2,11 @@ import argparse
 from argparse import Namespace
 from pathlib import Path
 import logging
-import sys
 from typing import Tuple, Dict
 
 import rtoml
 
-from aeons_utils import execute, find_exe, init_logger
+from .aeons_utils import execute, find_exe, init_logger
 
 """
 Configuration of Aeons and Readfish:
@@ -26,9 +25,40 @@ class Config:
         Initialise the configuration for AEONS,
         by loading the path to the defaults toml
         """
-        self.template_toml = Path(sys.argv[0]).parent / "aeons_template.toml"
-        if not self.template_toml.is_file():
-            raise FileNotFoundError("Template TOML with configuration defaults not found. Exiting")
+        self.template_toml = """
+        [general]
+        name = "aeons"                   # experiment name
+        
+        [live]
+        device = ""                     # position on sequencer
+        host = "localhost"              # host of sequencing device
+        port = 9502                     # port of sequencing device
+        data_wait = 100                 # wait for X Mb data before first asm
+        prom = false
+        
+        [optional]
+        bsize = 4000                    # number of reads in each deposited file
+        temperature = 60                # max batches during which to consider fragments
+        wait = 60                       # waiting time between updates in live version
+        
+        [filters]                       # overwrite filters
+        min_seq_len = 2500
+        min_contig_len = 10_000
+        min_s1 = 200
+        min_map_len = 2000
+        
+        [const]                         # overwrite constants
+        mu = 400                        # length of anchor bases
+        tetra = true                    # perform tetranucleotide frequency tests
+        filter_repeats = false          # perform repeat filtering
+        lowcov = 10                     # target for assemblies
+        
+        [simulation]                    # simulation arguments
+        fq = ""
+        maxb = 400
+        binit = 5
+        dumptime = 200000000         
+        """
 
 
     def load_defaults(self):
@@ -37,7 +67,7 @@ class Config:
 
         :return:
         """
-        self.args = rtoml.load(self.template_toml)
+        self.args = rtoml.loads(self.template_toml)
 
 
     @staticmethod
@@ -125,7 +155,7 @@ class Config:
             raise ValueError("Need either fastq for simulation or device for live run")
 
 
-def impute_args(args_aeons: Dict, args_readfish: Dict) -> None:
+def impute_args(args_aeons: argparse.Namespace, args_readfish: Dict) -> None:
     """
     We set a few arguments in readfish, depending on the config given to AEONS
     And vice-versa some arguments in AEONS are set depending on the readfish config
@@ -140,16 +170,16 @@ def impute_args(args_aeons: Dict, args_readfish: Dict) -> None:
     if type(args_readfish['regions']) is not list:
         raise ValueError("Readfish regions must be specified as array")
     if len(args_readfish['regions']) >= 2:
-        args_aeons['live']['split_flowcell'] = True
+        args_aeons.split_flowcell = True
     else:
-        args_aeons['live']['split_flowcell'] = False
+        args_aeons.split_flowcell = False
 
     # make sure the names of aeons and regions on flowcell are the same
     for region in args_readfish['regions']:
         if region['name'] in {"control", "Control"}:
             pass
         if region['name'] in {"aeons", "Aeons"}:
-            region['name'] = args_aeons['general']['name']
+            region['name'] = args_aeons.name
 
 
 def create_dummy_mmi() -> None:
@@ -216,13 +246,11 @@ def load_config(toml_paths: argparse.Namespace = None) -> argparse.Namespace:
     """
     conf = Config()
     conf.load_defaults()
-    # load command line toml file
+    # load TOMLs from command line
     if not toml_paths:
         toml_paths = conf.get_toml_paths()
     args_aeons_file, args_readfish = conf.load_toml_args(toml_paths)
     conf.overwrite_defaults(args_aeons_file)
-    # exchange args between the tools
-    impute_args(conf.args, args_readfish)
     # set run to either sim or live
     conf.check_run_type()
     # convert aeons args to Namespace
@@ -231,16 +259,17 @@ def load_config(toml_paths: argparse.Namespace = None) -> argparse.Namespace:
     init_logger(logfile=f'{args_namespace.name}.aeons.log', args=args_namespace)
     # config settings for readfish
     if args_namespace.live_run:
+        # exchange args between the tools
+        impute_args(args_namespace, args_readfish)
         # inject arguments for readfish where to look for new masks and contigs
-        set_boss_args(args_rf=args_readfish, name=conf.args['general']['name'])
+        set_boss_args(args_rf=args_readfish, name=args_namespace.name)
         # validate readfish args
-        validate_readfish_conf(args_readfish, prom=conf.args['live']['prom'])
+        validate_readfish_conf(args_readfish, prom=args_namespace.prom)
         # create empty mmi for readfish
         create_dummy_mmi()
         # write toml for readfish
         _ = args_readfish.pop('channels', None)
         rtoml.dump(args_readfish, file=Path(f'readfish.toml'), pretty=True)
-
     return args_namespace
 
 
