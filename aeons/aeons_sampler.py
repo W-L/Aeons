@@ -17,7 +17,7 @@ import numpy as np
 
 class FastqStream:
 
-    def __init__(self, source: str = None, bsize: int = 4000, workers: int = 10, seed: int = 0):
+    def __init__(self, source: str = None, bsize: int = 4000, workers: int = 8, seed: int = 0):
         """
         Initialize FastqStream with random sampling without mmap
         Uses random jump into file instead of pre-recorded offsets
@@ -237,7 +237,7 @@ class FastqStream_mmap:
 
 
 
-    def _load_offsets(self, seed: int, shuffle: bool = False, batchsize: int = 1, maxbatch: int = 1) -> None:
+    def _load_offsets(self, seed: int = 1, shuffle: bool = False, batchsize: int = 1, maxbatch: int = 1) -> None:
         """
         Load offsets of sequencing reads in a fastq file.
 
