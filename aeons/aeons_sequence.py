@@ -149,11 +149,11 @@ class SequenceAVA:
         return containments, overlappers
 
 
-    def remove_links(self, sequences: List[str]) -> None:
+    def remove_links(self, sequences: Set[str]) -> None:
         """
         Remove overlaps of certain sequences.
 
-        :param sequences: List of sequence IDs to remove overlaps from.
+        :param sequences: Set of sequence IDs to remove overlaps from.
         """
         for sid in sequences:
             # targets for overlaps where sid is "query"
@@ -649,12 +649,12 @@ class SequencePool:
         return new_ava, new_onto_pool
 
 
-    def remove_sequences(self, sequences: List[str]) -> None:
+    def remove_sequences(self, sequences: Set[str]) -> None:
         """
         Remove sequences from the pool based on their IDs.
         Once a read is used, it can not contribute to other alignments
 
-        :param sequences: List of sequence IDs to remove.
+        :param sequences: Set of sequence IDs to remove.
         """
         pre = len(self.sequences)
         popped = 0
