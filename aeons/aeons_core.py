@@ -10,6 +10,7 @@ from sys import exit
 from pathlib import Path
 from io import StringIO
 from typing import Set, Dict, List
+import inspect
 
 import numpy as np
 from numpy.typing import NDArray
@@ -127,16 +128,15 @@ class AeonsRun:
         :return:
         """
         # check that the readfish.toml that aeons wrote exists
-        if not Path("readfish.toml").exists():
-            raise FileNotFoundError("readfish.toml does not exist. Something went wrong loading configs")
+        if not Path(self.args.toml_readfish).exists():
+            raise FileNotFoundError("readfish toml does not exist. Something went wrong loading configs")
         # launch readfish into the background
-        import inspect
         module_path = inspect.getfile(AeonsRun)
         logging.info(module_path)
         script_path = Path(module_path).parent / "aeons_readfish.py"
         if not script_path.is_file():
             raise FileNotFoundError("aeons_readfish.py not found. Something went wrong..")
-        readfish_comm = f'python {script_path} {self.args.device} {self.args.name}'
+        readfish_comm = f'python {script_path} {self.args.toml_readfish} {self.args.device} {self.args.name} 2>&1 | tee -a readfish.log'
         logging.info("Launching readfish")
         logging.info(readfish_comm)
         spawn(readfish_comm)
@@ -178,11 +178,11 @@ class AeonsRun:
         :return:
         """
         while True:
-            logging.info("waiting for data ... ")
-            time.sleep(10)
+            logging.info(f"waiting for {self.args.data_wait} Mbases of data ... \n")
+            time.sleep(30)
             new_fastq = LiveRun.scan_dir(fq=self.args.fq, processed_files=set())
             fq_batch = FastqBatch(fq_files=new_fastq, channels=self.channels)
-            logging.info(f"sequenced bases so far: {fq_batch.total_bases}")
+            logging.info(f"available so far: {fq_batch.total_bases / 1e6} Mbases")
             if fq_batch.total_bases / 1e6 < self.args.data_wait:
                 continue
             else:
@@ -695,7 +695,7 @@ class LiveRun:
         :param run_name: experiment name of BOSS region
         :return: Set of channel numbers from which to consider data
         """
-        toml_dict = rtoml.load(channels_toml)
+        toml_dict = rtoml.load(Path(channels_toml))
         # find the corresponding condition
         correct_key = ''
         for key in toml_dict["conditions"].keys():
@@ -728,7 +728,7 @@ class LiveRun:
             all_fq.update(glob.glob(f'{fq}/{p}'))
         # which files have we not seen before?
         new_fq = all_fq.difference(processed_files)
-        logging.info(f"found {len(new_fq)} new fq files: \n {new_fq}")
+        logging.info(f"found {len(new_fq)} new fq files")
         new_fq_list = [f for f in new_fq]
         return new_fq_list
 
