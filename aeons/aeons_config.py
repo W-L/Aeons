@@ -1,12 +1,11 @@
 import argparse
 from argparse import Namespace
 from pathlib import Path
-import logging
 from typing import Tuple, Dict
 
 import rtoml
 
-from .aeons_utils import execute, find_exe, init_logger
+from .aeons_utils import init_logger
 
 """
 Configuration of Aeons and Readfish:
@@ -175,23 +174,9 @@ def impute_args(args_aeons: argparse.Namespace, args_readfish: Dict) -> None:
         args_aeons.split_flowcell = False
 
     # make sure the names of aeons and regions on flowcell are the same
-    for region in args_readfish['regions']:
-        if region['name'] in {"control", "Control"}:
-            pass
-        if region['name'] in {"aeons", "Aeons"}:
-            region['name'] = args_aeons.name
-
-
-def create_dummy_mmi() -> None:
-    """
-    To initialise a mappy-mapper, we need some .mmi
-    Since we don't have contigs in the beginning we create an empty index
-
-    :return:
-    """
-    mm2 = find_exe("minimap2")
-    cmd = f'echo " " | {mm2} -x map-ont -d readfish.mmi - '
-    execute(cmd)
+    region_names = {r['name'] for r in args_readfish['regions']}
+    if args_aeons.name not in region_names:
+        raise ValueError("One of the regions in readfish needs the same name as the experiment in AEONS")
 
 
 def validate_readfish_conf(args_rf: Dict, prom: bool) -> int:
@@ -209,27 +194,8 @@ def validate_readfish_conf(args_rf: Dict, prom: bool) -> int:
         conf = Conf.from_dict(args_rf, channels)
     except ValueError("Could not load TOML config for readfish"):
         return 1
-    logging.info(conf.describe_experiment())
     return 0
 
-
-def set_boss_args(args_rf: Dict, name: str) -> None:
-    """
-    Set some arguments in the readfish region that uses AEONS
-    I.e. where to look for new masks and indices
-
-    :param args_rf: Dictionary of readfish config
-    :param name: experiment name
-    :return:
-    """
-    injected = 0
-    for region in args_rf['regions']:
-        if region['name'] == name:
-            region['masks'] = f"out_{name}/masks"
-            region['contigs'] = f"out_{name}/contigs"
-            injected = 1
-    if not injected:
-        raise ValueError("BOSS arguments not set, no specified region found")
 
 
 
@@ -259,17 +225,12 @@ def load_config(toml_paths: argparse.Namespace = None) -> argparse.Namespace:
     init_logger(logfile=f'{args_namespace.name}.aeons.log', args=args_namespace)
     # config settings for readfish
     if args_namespace.live_run:
+        # add path to readfish toml as arg
+        args_namespace.toml_readfish = toml_paths.toml_readfish
         # exchange args between the tools
         impute_args(args_namespace, args_readfish)
-        # inject arguments for readfish where to look for new masks and contigs
-        set_boss_args(args_rf=args_readfish, name=args_namespace.name)
         # validate readfish args
         validate_readfish_conf(args_readfish, prom=args_namespace.prom)
-        # create empty mmi for readfish
-        create_dummy_mmi()
-        # write toml for readfish
-        _ = args_readfish.pop('channels', None)
-        rtoml.dump(args_readfish, file=Path(f'readfish.toml'), pretty=True)
     return args_namespace
 
 
