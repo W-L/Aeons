@@ -51,7 +51,8 @@ from readfish.entry_points import targets
 from _cli_base import main
 import numpy as np
 import sys
-
+import os
+import mappy
 
 
 class AnalysisMod(targets.Analysis):
@@ -99,8 +100,9 @@ class AnalysisMod(targets.Analysis):
                 continue
 
             # boss load updated decision masks and contigs
-            masks, mapper = boss.reload(conf=self.conf)
-            self.mapper = mapper  # replace the mapper with new one
+            reloaded, mapper = boss.reload(conf=self.conf)
+            if reloaded:
+                self.mapper = mapper  # replace the mapper with new one
 
             last_live_toml_mtime = self.reload_toml(last_live_toml_mtime)
             ########### Main Loop ###########
@@ -297,6 +299,8 @@ class BossBits:
         self.masks = {}
         self.logger = logger
         self.mapper = mapper
+        self.last_mask_mtime = 0
+        self.last_contig_mtime = 0
 
         # Overwrite the default strand_converter
         # used to index into the strategies,
@@ -306,88 +310,107 @@ class BossBits:
         self.strand_converter = {1: False, -1: True}
 
         # grab path to masks and contigs, requires presence of 1 BOSS region in toml
-        self.masks_path = ""
-        self.contigs_path = ""
-
         for region in conf.regions:
-            masks_path = getattr(region, "masks", "")
-            if masks_path:
-                self.masks_path = Path(masks_path)
-                break
+            # get the regions that is not the control
+            # this currently limits using BOSS in a single region
+            if region.control is False:
+                self.mask_path = Path(f"out_{region.name}/masks")
+                self.cont_path = Path(f"out_{region.name}/contigs")
+                if not self.mask_path.is_dir():
+                    os.makedirs(self.mask_path)
+                    os.makedirs(self.cont_path)
+                # cont path is allowed to be empty to run this same code with BR in future
+                if not self.cont_path.is_dir():
+                    self.cont_path = ""
+        self.logger.info(f"Looking for BOSS related files at: \n"
+                         f" strategies: {self.mask_path} \n"
+                         f" contigs: {self.cont_path}")
+        # if there is no strategy, generate dummy to start with
+        # is_empty = not any(self.mask_path.iterdir())
+        # if is_empty:
+        self.logger.info("Creating dummy strategy")
+        contig_strats = {'init': np.ones(1)}
+        np.savez(self.mask_path / "aeons", **contig_strats)
 
-        for region in conf.regions:
-            contigs_path = getattr(region, "contigs", "")
-            if contigs_path:
-                self.contigs_path = Path(contigs_path)
-                break
 
-        if not self.masks_path or not self.contigs_path:
-            raise FileNotFoundError("No paths to masks or contigs found. Is BOSS region set in toml?")
+    @staticmethod
+    def reload_npy(mask_files):
+        return {path.stem: np.load(path) for path in mask_files}
+
+
+    @staticmethod
+    def reload_npz(mask_files):
+        mask_container = np.load(mask_files[0])
+        return {name: mask_container[name] for name in mask_container}
+
+
+    @staticmethod
+    def idx(fa):
+        idx_name = fa.stem + ".mmi"
+        mappy.Aligner(fn_idx_in=str(fa), fn_idx_out=str(idx_name), preset="map-ont")
+        return idx_name
 
 
     def reload_masks(self):
         """
-        Reload updated decision masks. Only load if the marker file exists
-        Loads all present .npy/.npz files and deletes the marker file
+        Reload updated decision masks.
+        Loads all present .npy/.npz files
         """
-        if not (self.masks_path / "masks.updated").exists():
-            return
-
-        def reload_npy(mask_files):
-            self.masks = {path.stem: np.load(path) for path in mask_files}
-
-        def reload_npz(mask_files):
-            mask_container = np.load(mask_files[0])
-            self.masks = {name: mask_container[name] for name in mask_container}
-
         # can use multiple .npy or a single .npz file
         # BR uses .npy for the moment, BA uses single npz
-        new_masks = list(self.masks_path.glob("*.npy"))
+        new_masks = list(self.mask_path.glob("*.npy"))
         if new_masks:
-            reload_func = reload_npy
+            reload_func = self.reload_npy
         elif not new_masks:
-            new_masks = list(self.masks_path.glob("*.npz"))
-            reload_func = reload_npz
+            new_masks = list(self.mask_path.glob("*.npz"))
+            reload_func = self.reload_npz
         else:
-            reload_func = False
-            self.logger.info("Expected either .npy or .npz file but found neither")
+            raise FileNotFoundError("No mask files present")
+
+        # Do we actually update this time?
+        if not new_masks[0].stat().st_mtime > self.last_mask_mtime:
+            return 0
 
         try:
-            reload_func(mask_files=new_masks)
-            self.logger.info(f"Reloaded mask dict for {self.masks.keys()}")
+            mask_dict = reload_func(mask_files=new_masks)
+            self.masks = mask_dict
+            self.logger.info(f"Reloaded strategies for {len(set(self.masks.keys()))} sequences")
         except Exception as e:
-            self.logger.error(f"Error reading mask array ->>> {repr(e)}")
+            self.logger.error(f"Error reading strategy array ->>> {repr(e)}")
             self.masks = {"exception": True}
-        (self.masks_path / "masks.updated").unlink()
-
+        # update last mtime
+        self.last_mask_mtime = new_masks[0].stat().st_mtime
+        return 1
 
 
     def reload_mapper(self, conf):
         """
         Reload mapping index for decision-making. Only load if marker file exists.
         """
+        # Do we actually update this time?
+        cs = self.cont_path / "aeons.fa"
+        if not cs.exists():
+            return
 
-        # if contigs were not updated since last time
-        if not (self.contigs_path / "contigs.updated").exists():
+        # check if contigs are newer than before
+        if not cs.stat().st_mtime > self.last_contig_mtime:
             return
 
         try:
-            contigs_mmi = [path for path in self.contigs_path.glob("*.mmi")][0]
+            self.logger.info(f"Regenerating mapping index")
+            idx_name = self.idx(fa=cs)
             self.logger.info(f"Reloading mapping index")
-
-            # TODO here figure out how to reload this thing
-            conf.fn_idx_in = contigs_mmi
+            conf.mapper_settings.parameters['fn_idx_in'] = idx_name
             mapper: AlignerABC = conf.mapper_settings.load_object("Aligner")
             self.mapper = mapper
             self.logger.info("Aligner initialised")
-            # mapper = CustomMapper(str(contigs_mmi))
-            # wait until init is complete
-            while not mapper.initialised:
+            while not self.mapper.initialised:
                 time.sleep(1)
+            # new last mtime
+            self.last_contig_mtime = cs.stat().st_mtime
 
         except Exception as e:
             self.logger.error(f"Error loading mapping index ->>> {repr(e)}")
-        (self.contigs_path / "contigs.updated").unlink()
 
 
     def check_names(self):
@@ -396,22 +419,25 @@ class BossBits:
         """
         if not self.mapper.initialised:
             return
+
         mask_names = sorted(list(self.masks.keys()))
-        contig_names = sorted(list(self.mapper.mapper.seq_names))
+        contig_names = sorted(list(self.mapper.aligner.seq_names))
         same_names = mask_names == contig_names
         if not same_names:
-            self.logger.error(f"Error loading masks and contigs: discrepancy in names \n {mask_names} \n {contig_names}")
+            self.logger.error(f"Error loading masks and contigs: discrepancy in names {len(mask_names)} {len(contig_names)} \n\n\n\n\n")
 
 
     def reload(self, conf):
         # masks are reloaded from mask files
-        self.reload_masks()
+        reloaded_masks = self.reload_masks()
+        if not reloaded_masks:
+            return 0, self.mapper
         # only reload contigs if using AEONS
-        if self.contigs_path:
+        if self.cont_path:
             self.reload_mapper(conf)
         # check that the names of the masks and contigs are the same
         self.check_names()
-        return self.masks, self.mapper
+        return 1, self.mapper
 
 
     def check_coord(self, contig, start_pos, reverse):
@@ -463,10 +489,10 @@ class BossBits:
         # targets = conf.get_targets(result.channel, result.barcode)
         results = result.alignment_data
         matches = []
-        for al in results:  # TODO check with rory that the strands are correct
+        for al in results:
             contig = al.ctg
             strand = al.strand
-            coord = al.r_st if al.strand == -1 else al.r_en
+            coord = al.r_st if al.strand == 1 else al.r_en  # TODO this is different from readfish now
             # matches.append(targets.check_coord(contig, strand, coord))
             strand_conv = self.strand_converter[al.strand]
             matches.append(self.check_coord(contig=contig, start_pos=coord, reverse=strand_conv))
@@ -484,24 +510,41 @@ class BossBits:
         raise ValueError()
 
 
+    @staticmethod
+    def gen_dummy_idx() -> None:
+        """
+        Generate a dummy index for readfish to start out with
+
+        :return:
+        """
+        # generate dummy index
+        with open("dummy.fa", "w") as dfa:
+            dfa.write(">init\nAAAAAAAAAAAAAAAAAAAAAAAAA")
+        mappy.Aligner(fn_idx_in="dummy.fa", fn_idx_out="readfish.mmi", preset="map-ont")
+        Path("dummy.fa").unlink()
+
+
 
 # run the main function - equivalent to launching entry-point in readfish from _cli_base.py
-device = sys.argv[1]
-name = sys.argv[2]
+toml_readfish = sys.argv[1]
+device = sys.argv[2]
+name = sys.argv[3]
 # host = sys.argv[3]
 # port = sys.argv[4]
 
 # check arguments to add in future with: readfish targets -h
 parser, args = main(argv=[
     'targets',
+    '--toml', toml_readfish,
     '--device', device,
     '--experiment-name', name,
-    '--toml', 'readfish.toml',
-    '--log-file', 'readfish.log'
+    # '--log-file', 'readfish.log'
     # '--host', host,
     # '--port', port,
 ])
 
+
+BossBits.gen_dummy_idx()
 
 # in readfish main() of _cli_base.py would launch the entry-point
 run(parser=parser, args=args, extras=[])
