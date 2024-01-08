@@ -36,7 +36,6 @@ class Config:
         prom = false
         
         [optional]
-        bsize = 4000                    # number of reads in each deposited file
         temperature = 60                # max batches during which to consider fragments
         wait = 60                       # waiting time between updates in live version
         
@@ -54,6 +53,7 @@ class Config:
         
         [simulation]                    # simulation arguments
         fq = ""
+        bsize = 4000                    
         maxb = 400
         binit = 5
         dumptime = 200000000         
