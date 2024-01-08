@@ -1161,33 +1161,24 @@ class ContigPool(SequencePool):
         # Example how to load these:
         # container = np.load(f'{cpath}.npz')
         # data = {key: container[key] for key in container}
-        # place a marker that the strategies were updated
-        markerfile = f'{out_dir}/masks/masks.updated'
-        Path(markerfile).touch()
 
 
     def _write_index_file(self, out_dir: str, batch: int) -> None:
         """
-        Write a new index file to map against and place a marker file to trigger reloading strategies
+        Write a new contig file to map against. Readfish generates the mmi
 
         :param out_dir: The output directory.
         :param batch: The batch number.
         """
         fa_path = f'{out_dir}/contigs/aeons.fa'
-        mmi_path = f'{out_dir}/contigs/aeons.mmi'
         # save the contigs to fasta
         with open(fa_path, 'w') as fasta:
             for sid, seqo in self.sequences.items():
                 fasta.write(f'>{sid}\n')
                 fasta.write(f'{seqo.seq}\n')
-        # generate and save index with mappy
-        Indexer(fasta=fa_path, mmi=mmi_path)
         # copy previous contigs
         if batch % 10 == 0:
             copy(fa_path, f'{out_dir}/contigs/prev/aeons_{batch}.fa')
-        # place a marker that the contigs were updated
-        markerfile = f'{out_dir}/contigs/contigs.updated'
-        Path(markerfile).touch()
 
 
 class Unitig:
