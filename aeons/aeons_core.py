@@ -74,14 +74,14 @@ class AeonsRun:
         assert ' ' not in self.args.name
 
         self.out_dir = f'./out_{self.args.name}'
-        if not os.path.exists(self.out_dir):
-            os.mkdir(self.out_dir)
-            os.mkdir(f'{self.out_dir}/masks')
-            os.mkdir(f'{self.out_dir}/fq')
-            os.mkdir(f'{self.out_dir}/logs')
-            os.mkdir(f'{self.out_dir}/contigs')
-            os.mkdir(f'{self.out_dir}/contigs/prev')
-            os.mkdir(f'{self.out_dir}/contigs/init')
+        out_path = Path(self.out_dir)
+        out_path.mkdir(parents=True, exist_ok=True)
+        (out_path / "masks").mkdir(parents=True, exist_ok=True)
+        (out_path / "fq").mkdir(parents=True, exist_ok=True)
+        (out_path / "logs").mkdir(parents=True, exist_ok=True)
+        (out_path / "contigs").mkdir(parents=True, exist_ok=True)
+        (out_path / "contigs" / "prev").mkdir(parents=True, exist_ok=True)
+        (out_path / "contigs" / "init").mkdir(parents=True, exist_ok=True)
 
 
     def init_sim(self) -> None:
@@ -140,7 +140,6 @@ class AeonsRun:
         logging.info("Launching readfish")
         logging.info(readfish_comm)
         spawn(readfish_comm)
-        # time.sleep(10)  # TODO check if enough
 
 
     def init_live(self) -> None:
