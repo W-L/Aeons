@@ -1742,6 +1742,9 @@ class ReadlengthDist:
             # ignore rejected reads for the read length dist
             # might overestimate the length slightly
             if length > self.mu * 2:
+                # reads longer than 1M are counted as 1M
+                if length >= 1e6:
+                    length = int(1e6) - 1
                 self.read_lengths[length] += 1
             else:
                 continue
