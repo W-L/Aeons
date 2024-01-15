@@ -124,6 +124,7 @@ class AnalysisMod(targets.Analysis):
                     result.channel, result.barcode
                 )
                 # result.decision = make_decision(self.conf, result)
+                # boss decisions
                 result.decision = boss.make_decision_boss(self.conf, result)
                 action = condition.get_action(result.decision)
                 seen_count = self.chunk_tracker.seen(result.channel, result.read_number)
@@ -306,7 +307,7 @@ class BossBits:
         # used to index into the strategies,
         # which are shaped 2xN for forward & reverse in 1st dim
         # readfish uses 1 for forward, -1 for reverse
-        # BOSS uses 0/False for forward, 1/True for reverse
+        # For BOSS we use 0/False for forward, 1/True for reverse
         self.strand_converter = {1: False, -1: True}
 
         # grab path to masks and contigs, requires presence of 1 BOSS region in toml
@@ -464,8 +465,8 @@ class BossBits:
             return 1
         arr = self.masks.get(contig)
         try:
-            return arr[:, int(reverse)][start_pos // self.scale_factor]
-            # return arr[start_pos // self.scale_factor][int(reverse)]  # TODO check which is correct
+            d = arr[:, int(reverse)][start_pos // self.scale_factor]
+            return d
         except Exception as e:
             return 1
 
