@@ -2,6 +2,7 @@ import argparse
 from argparse import Namespace
 from pathlib import Path
 from typing import Tuple, Dict
+import sys
 
 import rtoml
 
@@ -70,7 +71,7 @@ class Config:
 
 
     @staticmethod
-    def get_toml_paths() -> argparse.Namespace:
+    def get_toml_paths(args: list) -> argparse.Namespace:
         """
         Parse TOML paths given as arguments on the command line
 
@@ -88,7 +89,7 @@ class Config:
             type=str,
             default=None,
             help='TOML configuration file for readfish')
-        toml_paths = parser.parse_args()
+        toml_paths = parser.parse_args(args)
         return toml_paths
 
 
@@ -163,6 +164,11 @@ def impute_args(args_aeons: argparse.Namespace, args_readfish: Dict) -> None:
     :param args_readfish: Config dictionary for readfish
     :return:
     """
+    # this is only intended for live runs
+    if not args_aeons.live_run:
+        raise ValueError("Imputing args only intended for live run")
+    if not type(args_aeons) is argparse.Namespace:
+        raise ValueError("aeons args need to be namespace")
     # check if there are multiple conditions in readfish
     # this sets split_flowcell in AEONS
     # alternative is to run only AEONS across an entire flowcell
@@ -214,7 +220,7 @@ def load_config(toml_paths: argparse.Namespace = None) -> argparse.Namespace:
     conf.load_defaults()
     # load TOMLs from command line
     if not toml_paths:
-        toml_paths = conf.get_toml_paths()
+        toml_paths = conf.get_toml_paths(args=sys.argv[1:])
     args_aeons_file, args_readfish = conf.load_toml_args(toml_paths)
     conf.overwrite_defaults(args_aeons_file)
     # set run to either sim or live
