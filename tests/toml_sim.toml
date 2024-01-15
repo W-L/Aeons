@@ -1,0 +1,15 @@
+[general]
+name = "aeons"
+
+[optional]
+bsize = 400
+
+[const]
+tetra = true
+filter_repeats = false
+
+[simulation]
+fq = "/home/lukas/Desktop/Aeons/data/zymogut/SRR17913199_100k.fastq"
+maxb = 240
+binit = 100
+dumptime = 50000000

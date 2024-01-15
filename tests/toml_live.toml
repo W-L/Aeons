@@ -1,0 +1,17 @@
+[general]
+name = "aeons"                  # experiment name
+
+[live]
+device = "MS00000"              # position on sequencer
+host = "localhost"              # host of sequencing device
+port = 9502                     # port of sequencing device
+data_wait = 30                  # wait for X Mb data before first asm
+prom = false
+
+
+[optional]
+wait = 30
+
+[const]
+lowcov = 1
+
