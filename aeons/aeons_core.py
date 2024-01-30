@@ -1,4 +1,5 @@
 import argparse
+import subprocess
 import os
 import gzip
 import sys
@@ -18,7 +19,7 @@ import rtoml
 from minknow_api.manager import Manager
 from minknow_api import __version__ as minknow_api_version
 
-from .aeons_utils import execute, random_id, empty_file, readfq, spawn
+from .aeons_utils import execute, random_id, empty_file, readfq
 from .aeons_sampler import FastqStream_mmap
 from .aeons_paf import Paf, choose_best_mapper
 from .aeons_mapper import LinearMapper
@@ -139,7 +140,7 @@ class AeonsRun:
         readfish_comm = f'python {script_path} {self.args.toml_readfish} {self.args.device} {self.args.name} 2>&1 | tee -a readfish.log'
         logging.info("Launching readfish")
         logging.info(readfish_comm)
-        spawn(readfish_comm)
+        subprocess.Popen(readfish_comm, shell=True)
 
 
     def init_live(self) -> None:
