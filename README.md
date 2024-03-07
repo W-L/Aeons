@@ -1,6 +1,15 @@
 # AEONS 
 
 
+This repository is deprecated and archived. 
+The functionality of AEONS is now incorporated in BOSS*, which lives in this repository: 
+[BOSS-RUNS](https://github.com/goldman-gp-ebi/BOSS-RUNS)
+
+
+
+## ORIGINAL README BELOW
+
+
 ## Requirements
 
 - Linux
